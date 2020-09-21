@@ -1,0 +1,307 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR ORGANIZATION
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2019-02-27 18:17+0100\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+
+
+#: automato/modules/astral.py:21
+msgid "Export times for various positions of the sun: dawn, sunrise, solar noon, sunset, dusk."
+msgstr ""
+
+#: automato/modules/clock.py:9 automato/modules/clock.py:29
+msgid "Send current time in unix timestamp"
+msgstr ""
+
+#: automato/modules/clock.py:18
+msgid "Current time in unix timestamp"
+msgstr ""
+
+#: automato/modules/clock.py:19
+msgid "Current time is {_[value!strftime(%Y-%m-%d %H:%M:%S)]}"
+msgstr ""
+
+#: automato/modules/health.py:33
+msgid "Health of the entry (alive or dead)"
+msgstr ""
+
+#: automato/modules/http-request.py:14
+msgid "Publish content by parsing an HTTP request"
+msgstr ""
+
+#: automato/modules/net-sniffer.py:29 automato/modules/net-sniffer.py:56
+msgid "Sniff network searching for mac addresses"
+msgstr ""
+
+#: automato/modules/net-sniffer.py:63
+msgid "Detected device on network: {value}"
+msgstr ""
+
+#: automato/modules/net.py:22
+msgid "Network utilities"
+msgstr ""
+
+#: automato/modules/net.py:28
+msgid "IP address of the wan connection"
+msgstr ""
+
+#: automato/modules/net.py:29
+msgid "Current wan ip is {value[wan-ip]}"
+msgstr ""
+
+#: automato/modules/net.py:36
+msgid "IP address detected by internet"
+msgstr ""
+
+#: automato/modules/net.py:37
+msgid "Current external ip is {value[external-ip]}"
+msgstr ""
+
+#: automato/modules/net.py:45
+msgid "Get IP addresses of the wan connection and detected by internet (if different, probabily you are behind a NAT)"
+msgstr ""
+
+#: automato/modules/net.py:50
+msgid "Get IP address of the wan connection"
+msgstr ""
+
+#: automato/modules/net.py:55
+msgid "Get IP address detected by internet"
+msgstr ""
+
+#: automato/modules/notifications.py:23 automato/modules/notifications.py:48
+msgid "Last notifications published on network"
+msgstr ""
+
+#: automato/modules/notifications.py:28
+msgid "Subscribe client to a notification pattern"
+msgstr ""
+
+#: automato/modules/notifications.py:35
+msgid "Unsubscribe client to a previously subscribed notification pattern"
+msgstr ""
+
+#: automato/modules/notifications.py:112
+msgid "Client subscribed to notification pattern {pattern}: {driver}:{data}"
+msgstr ""
+
+#: automato/modules/notifications.py:131
+msgid "Client unsubscribed from notification pattern {pattern}: {driver}:{data}"
+msgstr ""
+
+#: automato/modules/owntracks.py:27
+msgid "Support for Owntracks mobile app (https://owntracks.org/)"
+msgstr ""
+
+#: automato/modules/presence.py:32 automato/modules/presence.py:37
+#: automato/modules/presence.py:55
+msgid "List people connected to local wi-fi"
+msgstr ""
+
+#: automato/modules/presence.py:43
+msgid "A new occupant has been detected"
+msgstr ""
+
+#: automato/modules/presence.py:45
+msgid "{value[name]} has entered"
+msgstr ""
+
+#: automato/modules/presence.py:48
+msgid "An occupant has gone away"
+msgstr ""
+
+#: automato/modules/presence.py:50
+msgid "{value[name]} has gone away"
+msgstr ""
+
+#: automato/modules/presence.py:149
+msgid "{name} since {fromtime}"
+msgstr ""
+
+#: automato/modules/presence.py:151
+msgid "People detected:"
+msgstr ""
+
+#: automato/modules/presence.py:153
+msgid "No people detected"
+msgstr ""
+
+#: automato/modules/shelly.py:82
+msgid "Shelly device {caption} has changed power toggle state"
+msgstr ""
+
+#: automato/modules/shelly.py:91
+msgid "Shelly device '{caption}' toggle state: {{_[value!caption]}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:97
+msgid "Sonoff device {caption} has changed power toggle state"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:99
+msgid "Sonoff device '{caption}' toggle state: {{value}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:108
+msgid "Sonoff device {caption} command result"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:110
+msgid "Sonoff device '{caption}' result for last command executed: {{value}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:119
+msgid "Sonoff device {caption} connection status"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:121
+msgid "Sonoff device '{caption}' is connected to: {{value[Wifi][SSID!'']}}{{value[Wifi][SSId!'']}} ({{value[Wifi][RSSI]}}%), uptime: {{value[Uptime]}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:130
+msgid "Tells if the sonoff device {caption} is connected"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:132
+msgid "Sonoff device '{caption}' is {{value}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:180
+msgid "Sonoff device '{caption}' configuration: {{value}}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:186
+msgid "Sonoff device '{caption}' switch {n} state: {v}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:194
+msgid "Sonoff device '{caption}' sensor detects temperature: {temperature}°{unit}, humidity: {humidity}%"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:196
+msgid "Sonoff device '{caption}' sensor detects temperature: {temperature}°{unit}"
+msgstr ""
+
+#: automato/modules/sonoff-tasmota.py:205
+msgid "Sonoff device '{caption}' energy measurement: {{value}}"
+msgstr ""
+
+#: automato/modules/speedtest.py:15 automato/modules/speedtest.py:21
+#: automato/modules/speedtest.py:36
+msgid "Test internet connection speed via speedtest.net"
+msgstr ""
+
+#: automato/modules/speedtest.py:23
+msgid "Internet speed test: download = {value[download_mbps]} Mbps, upload = {value[upload_mbps]} Mbps, ping = {value[ping_ms]} ms via {value[server_name]} (data: {value[time!strftime(%Y-%m-%d %H:%M:%S)]})"
+msgstr ""
+
+#: automato/modules/speedtest.py:31
+msgid "Get latest internet connection speed test done (if present)"
+msgstr ""
+
+#: automato/modules/speedtest.py:58
+msgid "No previous test found"
+msgstr ""
+
+#: automato/modules/system.py:14
+msgid "Automato system manager"
+msgstr ""
+
+#: automato/modules/system.py:20
+msgid "System metadata built by an automato node (by merging local metadata with other nodes metadata)"
+msgstr ""
+
+#: automato/modules/system.py:26
+msgid "Detected a non-responding node, it will be considered as dead for next metadata broadcast"
+msgstr ""
+
+#: automato/modules/system.py:29
+msgid "Automato node \"{value[name]}\" is dead, last seen at {value[last_seen!strftime(%Y-%m-%d %H:%M:%S)]}"
+msgstr ""
+
+#: automato/modules/system.py:38
+msgid "Force the publishing on the broker of system metadata"
+msgstr ""
+
+#: automato/modules/system.py:92
+msgid "Hi, i'm automato node \"{name}\", and i don't receive my own metadata since {time}, problems on MQTT broker? Or am i dead?"
+msgstr ""
+
+#: automato/modules/telegram.py:73
+msgid "Syntax: "
+msgstr ""
+
+#: automato/modules/telegram.py:96
+msgid "({level} notification from {f})"
+msgstr ""
+
+#: automato/modules/telegram.py:100 automato/modules/telegram.py:108
+msgid "subscribe to notifications described by pattern"
+msgstr ""
+
+#: automato/modules/telegram.py:101 automato/modules/telegram.py:109
+msgid "Show commands description, use this for botfather's /setcommands"
+msgstr ""
+
+#: automato/modules/telegram.py:104
+msgid "send a generic TOPIC+MESSAGE to MQTT broker"
+msgstr ""
+
+#: automato/modules/telegram.py:108
+msgid "Syntax"
+msgstr ""
+
+#: automato/modules/telegram.py:117
+msgid "Syntax error"
+msgstr ""
+
+#: automato/modules/telegram.py:144
+msgid "Command not recognized, i'll send it to the broker, but i can't show any response"
+msgstr ""
+
+#: automato/modules/telegram.py:155
+msgid "No response received for {command}"
+msgstr ""
+
+#: automato/modules/telegram.py:158
+msgid "Telegram update '{update}' caused error '{error}'"
+msgstr ""
+
+#: automato/modules/toggle.py:100
+msgid "Show current extended toggle status of {caption} entry"
+msgstr ""
+
+#: automato/modules/toggle.py:108
+msgid "Current status of {caption} is: {{value[state!caption]}}"
+msgstr ""
+
+#: automato/modules/toggle.py:111
+msgid "Current status of {caption} is: {{value[state!caption]}}, timer: {{value[timer-to!strftime]}}"
+msgstr ""
+
+#: automato/modules/toggle.py:122
+msgid "Set toggle status of {caption} entry"
+msgstr ""
+
+#: automato/modules/toggle.py:129
+msgid "Get current toggle status of {caption} entry"
+msgstr ""
+
+#: automato/modules/toggle.py:136
+msgid "Revert toggle status of {caption} entry"
+msgstr ""
+
+#: automato/modules/toggle.py:143
+msgid "Set default values for {caption} entry"
+msgstr ""
+

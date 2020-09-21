@@ -1,0 +1,11 @@
+# CORE requirements
+# Use "requirements-all.txt" to install also requirements for all modules (core + all modules)
+
+# Use pip3 install -r requirements.txt to install
+# @see https://pip.pypa.io/en/stable/user_guide/#requirements-files https://pip.pypa.io/en/stable/reference/pip_install/#requirements-file-format
+
+# https://github.com/eclipse/paho.mqtt.python https://pypi.org/project/paho-mqtt/
+paho-mqtt >= 1.3.1
+
+# https://github.com/PiotrDabkowski/Js2Py
+Js2Py >= 0.60
