@@ -111,3 +111,23 @@ def parse_datetime(v, milliseconds_float = False):
 
 def json_sorted_encode(data):
   return json.dumps(data if not isinstance(data, dict) else {x:data[x] for x in sorted(data)})
+
+def b64_compress_data(data):
+  """
+  Compress and base-64 encode data
+  """
+  try:
+    return base64.b64encode(zlib.compress(json.dumps(data).encode('UTF-8'))).decode('UTF-8')
+  except:
+    logging.exception("utils.b64_compress_data> Error compressing: " + str(data))
+    return ""
+
+def b64_decompress_data(string):
+  """
+  Base 64 decode and decompress data
+  """
+  try:
+    return json.loads(zlib.decompress(base64.b64decode(string.encode('UTF-8'))).decode('UTF-8')) if isinstance(string, str) else string
+  except:
+    logging.exception("utils.b64_decompress_data> Error decompressing: " + str(string))
+    return None
