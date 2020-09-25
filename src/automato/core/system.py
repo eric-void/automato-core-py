@@ -709,13 +709,17 @@ def topic_matches(rule, topic, payload = None):
   
   return result
 
+def topic_match_priority(definition):
+  return definition['topic_match_priority'] if 'topic_match_priority' in definition else (1 if len(definition) > 1 or (len(definition) == 1 and 'topic' not in definition) else 0)
+
 def topic_cache_reset():
   global index_topic_cache
   index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } }
 
 def topic_cache_find(index, cache_key, topic, payload = None):
   """
-  @return (0: topic rule found, 1: topic metadata { 'definition': {}, 'entries': []}, 2: matches)
+  @param index is { topic:  { 'definition': { ... merged definition from all TOPIC published by entries ... }, 'entries': [ ... entry ids ... ]};
+  @return (0: topic rule found, 1: topic metadata { 'definition': { ... merged definition from all topic published by entries ... }, 'entries': [ ... entry ids ... ]}, 2: matches)
   """
   global index_topic_cache
   
@@ -832,11 +836,10 @@ def entries_publishers_of(topic, payload = None, strict_match = False):
       for entry_id in index_topic_published[topic]['entries']:
         entry = entry_get(entry_id)
         if entry:
-          if not entry_id in res:
-            res[entry_id] = {}
-          res[entry_id][topic] = {
+          res[entry_id] = {
             'entry': entry,
             'definition': entry.definition['publish'][topic],
+            'topic': topic,
             'matches': [],
           }
         else:
@@ -848,13 +851,15 @@ def entries_publishers_of(topic, payload = None, strict_match = False):
       for entry_id in t[1]['entries']:
         entry = entry_get(entry_id)
         if entry:
+          if entry_id in res and topic_match_priority(entry.definition['publish'][t[0]]) > topic_match_priority(res[entry_id]['definition']):
+            del res[entry_id]
           if not entry_id in res:
-            res[entry_id] = {}
-          res[entry_id][t[0]] = {
-            'entry': entry,
-            'definition': entry.definition['publish'][t[0]],
-            'matches': t[2],
-          }
+            res[entry_id] = {
+              'entry': entry,
+              'definition': entry.definition['publish'][t[0]],
+              'topic': t[0],
+              'matches': t[2],
+            }
         else:
           logging.error("SYSTEM> Internal error, entry references in index_topic_published not found: {entry_id}".format(entry_id = entry_id))
           
@@ -873,11 +878,10 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
       for entry_id in index_topic_subscribed[topic]['entries']:
         entry = entry_get(entry_id)
         if entry:
-          if not entry_id in res:
-            res[entry_id] = {}
-          res[entry_id][topic] = {
+          res[entry_id] = {
             'entry': entry,
             'definition': entry.definition['subscribe'][topic],
+            'topic': topic,
             'matches': [],
           }
         else:
@@ -888,13 +892,15 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
       for entry_id in t[1]['entries']:
         entry = entry_get(entry_id)
         if entry:
+          if entry_id in res and topic_match_priority(entry.definition['subscribe'][t[0]]) > topic_match_priority(res[entry_id]['definition']):
+            del res[entry_id]
           if not entry_id in res:
-            res[entry_id] = {}
-          res[entry_id][t[0]] = {
-            'entry': entry,
-            'definition': entry.definition['subscribe'][t[0]],
-            'matches': t[2],
-          }
+            res[entry_id] = {
+              'entry': entry,
+              'definition': entry.definition['subscribe'][t[0]],
+              'topic': t[0],
+              'matches': t[2],
+            }
         else:
           logging.error("SYSTEM> Internal error, entry references in index_topic_subscribed not found: {entry_id}".format(entry_id = entry_id))
   return res
@@ -934,10 +940,7 @@ class Message(object):
       _s = _stats_start()
       self._publishedMessages = []
       for entry_id in entries:
-        for entry_topic in entries[entry_id]:
-          entry = entries[entry_id][entry_topic]['entry']
-          definition = entries[entry_id][entry_topic]['definition']
-          self._publishedMessages.append(PublishedMessage(self, entries[entry_id][entry_topic]['entry'], entry_topic, entries[entry_id][entry_topic]['definition'], entries[entry_id][entry_topic]['matches'] if entries[entry_id][entry_topic]['matches'] != [True] else []))
+        self._publishedMessages.append(PublishedMessage(self, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] if entries[entry_id]['matches'] != [True] else []))
       _stats_end('Message.publishedMessages().create', _s)
       _stats_end('Message(' + self.topic + ').publishedMessages().create', _s)
 
@@ -968,10 +971,7 @@ class Message(object):
       _s = _stats_start()
       self._subscribedMessages = []
       for entry_id in entries:
-        for entry_topic in entries[entry_id]:
-          entry = entries[entry_id][entry_topic]['entry']
-          definition = entries[entry_id][entry_topic]['definition']
-          self._subscribedMessages.append(SubscribedMessage(self, entries[entry_id][entry_topic]['entry'], entry_topic, entries[entry_id][entry_topic]['definition'], entries[entry_id][entry_topic]['matches'] if entries[entry_id][entry_topic]['matches'] != [True] else []))
+        self._subscribedMessages.append(SubscribedMessage(self, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] if entries[entry_id]['matches'] != [True] else []))
       _stats_end('Message.subscribedMessages().create', _s)
       _stats_end('Message(' + self.topic + ').subscribedMessages().create', _s)
 
@@ -1289,16 +1289,15 @@ def subscribe_response(entry, message, callback = False, no_response_callback = 
   # Add specific listeners, as described in metadata 'response'
   subs = entries_subscribed_to(message.topic, message.payload)
   for entry_id  in subs:
-    for topic_rule in subs[entry_id]:
-      r = subs[entry_id][topic_rule]
-      if r['definition'] and 'response' in r['definition']:
-        for t in r['definition']['response']:
-          if 'topic' in t:
-            rtopic_rule = t['topic']
-            if "{" in rtopic_rule:
-              for i in range(0, len(r['matches'])):
-                rtopic_rule = rtopic_rule.replace("{matches[" + str(i) + "]}", str(r['matches'][i]))
-            s['listeners'].append({ 'topic_rule': rtopic_rule, 'expiry': timems() + (utils.read_duration(t['duration']) if 'duration' in t else default_duration) * 1000, 'count': t['count'] if 'count' in t else default_count })
+    r = subs[entry_id]
+    if r['definition'] and 'response' in r['definition']:
+      for t in r['definition']['response']:
+        if 'topic' in t:
+          rtopic_rule = t['topic']
+          if "{" in rtopic_rule:
+            for i in range(0, len(r['matches'])):
+              rtopic_rule = rtopic_rule.replace("{matches[" + str(i) + "]}", str(r['matches'][i]))
+          s['listeners'].append({ 'topic_rule': rtopic_rule, 'expiry': timems() + (utils.read_duration(t['duration']) if 'duration' in t else default_duration) * 1000, 'count': t['count'] if 'count' in t else default_count })
   
   if not s['listeners']:
     return False
