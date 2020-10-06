@@ -82,7 +82,7 @@ def notification_build(published_message):
     #  string = handler(entry, topic, getPayloadItem(payload, defaults)) # TODO notify_handler deve essere rifatto via JS, gli deve essere passato anche matches, e chi lo usa deve essere modificato di conseguenza
     string = scripting_js.script_eval(defaults['notify_handler'], {"topic": topic, "payload": payload, "matches": matches}, cache = True);
     
-  elif not string and 'notify' in defaults:
+  elif not string and 'notify' in defaults and defaults['notify'] and isinstance(defaults['notify'], str):
     string = defaults['notify'].format(payload = getPayloadItem(payload, defaults), _ = None if isinstance(payload, dict) else getPayloadItem({'payload': payload}, defaults), matches = matches, caption = entry.caption)
   
   if string:
