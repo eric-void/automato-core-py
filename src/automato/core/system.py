@@ -24,6 +24,7 @@ ENTRY_DEFINITION_EXPORTABLE = {
     'notify_change_duration': True,
     'notify_if': True,
     "events": True,
+    "topic_match_priority": True,
   },
   'subscribe': {
     'description': True,
@@ -37,6 +38,7 @@ ENTRY_DEFINITION_EXPORTABLE = {
     'notify_change_level': True,
     'notify_if': True,
     "actions": True,
+    "topic_match_priority": True,
   },
   'events_passthrough': True,
 }
@@ -710,7 +712,12 @@ def topic_matches(rule, topic, payload = None):
   return result
 
 def topic_match_priority(definition):
-  return definition['topic_match_priority'] if 'topic_match_priority' in definition else (1 if len(definition) > 1 or (len(definition) == 1 and 'topic' not in definition) else 0)
+  if 'topic_match_priority' in definition:
+    return definition['topic_match_priority']
+  for k in definition:
+    if not re.match('^(topic|notify.*|description)$', k):
+      return 1
+  return 0
 
 def topic_cache_reset():
   global index_topic_cache
