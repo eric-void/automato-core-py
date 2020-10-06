@@ -6,7 +6,7 @@
 import logging
 import js2py
 import hashlib
-#import json
+import threading
 
 from automato.core import system
 from automato.core import utils
@@ -19,6 +19,7 @@ from automato.core import utils
 js2py_use_compilation_plan = False
 
 script_eval_cache = {}
+script_eval_cache_lock = threading.Lock()
 script_eval_cache_hits = 0
 script_eval_cache_miss = 0
 script_eval_cache_disabled = 0
@@ -67,7 +68,7 @@ def script_eval(code, context = {}, to_dict = False, cache = False):
   return ret
 
 def _script_eval_int(code, context = {}, cache = False):
-  global script_eval_cache, script_eval_cache_hits, script_eval_cache_miss, script_eval_cache_skipped, script_eval_cache_disabled
+  global script_eval_cache, script_eval_cache_lock, script_eval_cache_hits, script_eval_cache_miss, script_eval_cache_skipped, script_eval_cache_disabled
 
   # TODO UNSUPPORTED: If context is the result of another exec/eval call, i must extract the real context from it. I'm skipping it right now
   # NOTE FUTURE: context._var._obj.own è un oggetto di tipo Scope (vedi https://github.com/PiotrDabkowski/Js2Py/blob/master/js2py/base.py#L1066) che contiene TUTTO l'ambiente js (quindi le variabili di context, ma anche tutto il resto)
@@ -75,10 +76,11 @@ def _script_eval_int(code, context = {}, cache = False):
 
   if cache:
     if len(script_eval_cache) > SCRIPT_EVAL_CACHE_MAXSIZE:
-      t = SCRIPT_EVAL_CACHE_PURGETIME
-      while len(script_eval_cache) > SCRIPT_EVAL_CACHE_MAXSIZE:
-        script_eval_cache = {x:script_eval_cache[x] for x in script_eval_cache if script_eval_cache[x]['used'] > system.time() - t}
-        t = t / 2 if t > 1 else -1
+      with script_eval_cache_lock:
+        t = SCRIPT_EVAL_CACHE_PURGETIME
+        while len(script_eval_cache) > SCRIPT_EVAL_CACHE_MAXSIZE:
+          script_eval_cache = {x:script_eval_cache[x] for x in script_eval_cache if script_eval_cache[x]['used'] > system.time() - t}
+          t = t / 2 if t > 1 else -1
 
     if isinstance(context, js2py.evaljs.EvalJs):
       cache = False
@@ -91,10 +93,11 @@ def _script_eval_int(code, context = {}, cache = False):
     if cache:
       key = "CONTEXT:" + str({x:context[x] for x in sorted(context)}) + ",CODE:" + code
       keyhash = hashlib.md5(key.encode('utf-8')).hexdigest()
-      if keyhash in script_eval_cache and script_eval_cache[keyhash]['key'] == key:
-        script_eval_cache[keyhash]['used'] = system.time()
-        script_eval_cache_hits += 1
-        return script_eval_cache[keyhash]['result']
+      with script_eval_cache_lock:
+        if keyhash in script_eval_cache and script_eval_cache[keyhash]['key'] == key:
+          script_eval_cache[keyhash]['used'] = system.time()
+          script_eval_cache_hits += 1
+          return script_eval_cache[keyhash]['result']
       script_eval_cache_miss += 1
     else:
       script_eval_cache_skipped += 1
@@ -108,10 +111,14 @@ def _script_eval_int(code, context = {}, cache = False):
   try:
     ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
     if cache:
-      script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret }
+      with script_eval_cache_lock:
+        script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret }
     return ret
   except:
-    logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)'))))
+    cdebug = {}
+    for k in contextjs.__context:
+      cdebug[k] = contextjs[k]
+    logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
 
 def script_exec(code, context = {}, to_dict = False):
   # TODO Supporto per altri linguaggi
@@ -121,7 +128,7 @@ def script_exec(code, context = {}, to_dict = False):
   try:
     return contextjs.execute(code, use_compilation_plan = js2py_use_compilation_plan)
   except:
-    logging.exception('scripting_js> error executing js script: {code}\n context: {context}\n'.format(code = code, context = context))
+    logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\n'.format(code = code, context = context))
 
 def _var_to_python(v):
   if isinstance(v, js2py.base.PyJs):
