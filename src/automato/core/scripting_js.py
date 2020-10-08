@@ -99,6 +99,9 @@ def _script_eval_int(code, context = {}, cache = False):
           script_eval_cache_hits += 1
           return script_eval_cache[keyhash]['result']
       script_eval_cache_miss += 1
+      
+      logging.debug("scripting> SCRIPT EVAL CACHE MISSED: " + key)
+      
     else:
       script_eval_cache_skipped += 1
   else:

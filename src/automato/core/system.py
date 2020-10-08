@@ -1189,9 +1189,11 @@ def _entry_event_invoke_listeners(entry, eventname, eventdata, caller, published
       if entry_ref == '*' or entry_id_match(entry, entry_ref):
         #logging.debug("_entry_event_invoke_listeners_match" + str(events_listeners[eventname][entry_ref]))
         for listener, condition in events_listeners[eventname][entry_ref]:
+          _s = _stats_start()
           if condition is None or _entry_event_params_match_condition(eventdata, condition):
             #logging.debug("_entry_event_invoke_listeners_GO")
             listener(entry, eventname, eventdata)
+          _stats_end('event_listener(' + str(listener) + '|' + str(condition) + ')', _s)
             
   if handler_on_all_events:
     for h in handler_on_all_events:
