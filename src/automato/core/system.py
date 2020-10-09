@@ -1203,7 +1203,7 @@ def _entry_event_params_match_condition(eventdata, condition):
   """
   @params eventdata { 'params' : ..., ... }
   """
-  return scripting_js.script_eval(condition, eventdata, cache = True)
+  return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, cache = True)
 
 def _entry_event_publish_and_invoke_listeners(entry, entry_topic, eventname, params, time):
   # @param entry_topic is "#events_passthrough" in case of events_passthrough
