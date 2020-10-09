@@ -111,6 +111,7 @@ def _script_eval_int(code, context = {}, cache = False):
   if code.startswith('js:'):
     code = code[3:]
   contextjs = script_context(context)
+  _s = system._stats_start()
   try:
     ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
     if cache:
@@ -122,16 +123,23 @@ def _script_eval_int(code, context = {}, cache = False):
     for k in contextjs.__context:
       cdebug[k] = contextjs[k]
     logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
+  finally:
+    system._stats_end('scripting_js.script_eval', _s)
+    
 
 def script_exec(code, context = {}, to_dict = False):
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
     code = code[3:]
   contextjs = script_context(context)
+  _s = system._stats_start()
   try:
     return contextjs.execute(code, use_compilation_plan = js2py_use_compilation_plan)
   except:
     logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\n'.format(code = code, context = context))
+  finally:
+    system._stats_end('scripting_js.script_exec', _s)
+    
 
 def _var_to_python(v):
   if isinstance(v, js2py.base.PyJs):

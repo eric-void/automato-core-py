@@ -83,7 +83,9 @@ def notification_build(published_message):
     string = scripting_js.script_eval(defaults['notify_handler'], {"topic": topic, "payload": payload, "matches": matches}, cache = True);
     
   elif not string and 'notify' in defaults and defaults['notify'] and isinstance(defaults['notify'], str):
+    _s = system._stats_start()
     string = defaults['notify'].format(payload = getPayloadItem(payload, defaults), _ = None if isinstance(payload, dict) else getPayloadItem({'payload': payload}, defaults), matches = matches, caption = entry.caption)
+    system._stats_end('notifications.build_string', _s)
   
   if string:
     changed = topic in notifications_last_topic_payloads and notifications_last_topic_payloads[topic][0] != string
