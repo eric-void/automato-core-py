@@ -173,7 +173,7 @@ def _script_code_uses_full_var(code, var):
   #return re.search(r'\b' + var + r'(\.|\[)', code)
   parts = re.split(r'\b' + var + r'\b', code)
   for i in range(0, len(parts) - 1):
-    if not re.search(r'\bin\s*$', parts[i]) and not re.search(r'^(\.|\[)', parts[i + 1]):
+    if not re.search(r'\b(typeof|in)\s*$', parts[i]) and not re.search(r'^(\.|\[)', parts[i + 1]):
       return True
   return False
 
