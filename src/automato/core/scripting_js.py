@@ -7,6 +7,7 @@ import logging
 import js2py
 import hashlib
 import threading
+import re
 
 from automato.core import system
 from automato.core import utils
@@ -24,6 +25,7 @@ script_eval_cache_hits = 0
 script_eval_cache_miss = 0
 script_eval_cache_disabled = 0
 script_eval_cache_skipped = 0
+script_eval_codecontext_signatures = {}
 SCRIPT_EVAL_CACHE_MAXSIZE = 1024
 SCRIPT_EVAL_CACHE_PURGETIME = 3600
 
@@ -62,13 +64,15 @@ def script_eval(code, context = {}, to_dict = False):
 """
 
 def script_eval(code, context = {}, to_dict = False, cache = False):
+  _s = system._stats_start()
   ret = _script_eval_int(code, context, cache)
   if ret and to_dict and ret and isinstance(ret, js2py.base.JsObjectWrapper):
     ret = ret.to_dict()
+  system._stats_end('scripting_js.script_eval', _s)
   return ret
 
 def _script_eval_int(code, context = {}, cache = False):
-  global script_eval_cache, script_eval_cache_lock, script_eval_cache_hits, script_eval_cache_miss, script_eval_cache_skipped, script_eval_cache_disabled
+  global script_eval_cache, script_eval_cache_lock, script_eval_cache_hits, script_eval_cache_miss, script_eval_cache_skipped, script_eval_cache_disabled, script_eval_codecontext_signatures
 
   # TODO UNSUPPORTED: If context is the result of another exec/eval call, i must extract the real context from it. I'm skipping it right now
   # NOTE FUTURE: context._var._obj.own è un oggetto di tipo Scope (vedi https://github.com/PiotrDabkowski/Js2Py/blob/master/js2py/base.py#L1066) che contiene TUTTO l'ambiente js (quindi le variabili di context, ma anche tutto il resto)
@@ -90,8 +94,43 @@ def _script_eval_int(code, context = {}, cache = False):
     #    if not (isinstance(context[x], str) or isinstance(context[x], int) or isinstance(context[x], bool)):
     #      cache = False
     #      break
+    
     if cache:
-      key = "CONTEXT:" + str({x:context[x] for x in sorted(context)}) + ",CODE:" + code
+      context_sorted = sorted(context)
+      
+      """
+      contextkey = {}
+      for v in context_sorted:
+        if isinstance(context[v], dict):
+          contextkey[v] = {}
+          for vv in context[v]:
+            contextkey[v][vv] = ''
+        else:
+          contextkey[v] = ''
+      """
+      # CONTEXT: part contains the first and second-level keys of context object, in the form { key: '', key: { dictkey: ''}}
+      codecontext_signature = "CODE:" + code + ",CONTEXT:" + str({x: ('' if not isinstance(context[x], dict) else {y: '' for y in sorted(context[x])}) for x in context_sorted})
+      
+      with script_eval_cache_lock:
+        if not codecontext_signature in script_eval_codecontext_signatures:
+          """
+          script_eval_codecontext_signatures[codecontext_signature] = {}
+          for v in context_sorted:
+            if re.search(r'\b' + v + r'\b', code):
+              if isinstance(context[v], dict):
+                script_eval_codecontext_signatures[codecontext_signature][v] = {}
+                for vv in context[v]:
+                  if re.search(r'\b' + vv + r'\b', code):
+                    script_eval_codecontext_signatures[codecontext_signature][v][vv] = ''
+              else:
+                script_eval_codecontext_signatures[codecontext_signature][v] = ''
+          """
+          # This struct contains the usage of context keys (first and second level) in the code. If a key is present, with value '', that key is used in the code as is. If not present, it's not used. If it's a dict, it reflects the usage of subkeys.
+          script_eval_codecontext_signatures[codecontext_signature] = { x: ('' if not isinstance(context[x], dict) or not re.search(r'\b' + x + r'(\.|\[)', code) else {y: '' for y in sorted(context[x]) if re.search(r'\b' + y + r'\b', code) }) for x in context_sorted if re.search(r'\b' + x + r'\b', code) }
+
+        #OBSOLETE: key = "CONTEXT:" + str({x:context[x] for x in context_sorted}) + ",CODE:" + code
+        key = "CONTEXT:" + str({x: (context[x] if script_eval_codecontext_signatures[codecontext_signature][x] == '' else {y: context[x][y] for y in sorted(context[x]) if y in script_eval_codecontext_signatures[codecontext_signature][x]}) for x in context_sorted if x in script_eval_codecontext_signatures[codecontext_signature]}) + ",CODE:" + code
+      
       keyhash = hashlib.md5(key.encode('utf-8')).hexdigest()
       with script_eval_cache_lock:
         if keyhash in script_eval_cache and script_eval_cache[keyhash]['key'] == key:
@@ -124,15 +163,15 @@ def _script_eval_int(code, context = {}, cache = False):
       cdebug[k] = contextjs[k]
     logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
   finally:
-    system._stats_end('scripting_js.script_eval', _s)
+    system._stats_end('scripting_js.script_eval(js2py)', _s)
     
 
 def script_exec(code, context = {}, to_dict = False):
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
     code = code[3:]
-  contextjs = script_context(context)
   _s = system._stats_start()
+  contextjs = script_context(context)
   try:
     return contextjs.execute(code, use_compilation_plan = js2py_use_compilation_plan)
   except:
