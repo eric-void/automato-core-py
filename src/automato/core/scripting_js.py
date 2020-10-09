@@ -126,7 +126,7 @@ def _script_eval_int(code, context = {}, cache = False):
                 script_eval_codecontext_signatures[codecontext_signature][v] = ''
           """
           # This struct contains the usage of context keys (first and second level) in the code. If a key is present, with value '', that key is used in the code as is. If not present, it's not used. If it's a dict, it reflects the usage of subkeys.
-          script_eval_codecontext_signatures[codecontext_signature] = { x: ('' if not isinstance(context[x], dict) or not re.search(r'\b' + x + r'(\.|\[)', code) else {y: '' for y in sorted(context[x]) if re.search(r'\b' + y + r'\b', code) }) for x in context_sorted if re.search(r'\b' + x + r'\b', code) }
+          script_eval_codecontext_signatures[codecontext_signature] = { x: ('' if not isinstance(context[x], dict) or _script_code_uses_full_var(code, x) else {y: '' for y in sorted(context[x]) if re.search(r'\b' + y + r'\b', code) }) for x in context_sorted if re.search(r'\b' + x + r'\b', code) }
 
         #OBSOLETE: key = "CONTEXT:" + str({x:context[x] for x in context_sorted}) + ",CODE:" + code
         key = "CONTEXT:" + str({x: (context[x] if script_eval_codecontext_signatures[codecontext_signature][x] == '' else {y: context[x][y] for y in sorted(context[x]) if y in script_eval_codecontext_signatures[codecontext_signature][x]}) for x in context_sorted if x in script_eval_codecontext_signatures[codecontext_signature]}) + ",CODE:" + code
@@ -165,6 +165,17 @@ def _script_eval_int(code, context = {}, cache = False):
   finally:
     system._stats_end('scripting_js.script_eval(js2py)', _s)
     
+
+def _script_code_uses_full_var(code, var):
+  """
+  Return if code uses the var, without dict key reference ("payload[x]" or "x in payload" uses key reference, "payload" not)
+  """
+  #return re.search(r'\b' + var + r'(\.|\[)', code)
+  parts = re.split(r'\b' + var + r'\b', code)
+  for i in range(0, len(parts) - 1):
+    if not re.search(r'\bin\s*$', parts[i]) and not re.search(r'^(\.|\[)', parts[i + 1]):
+      return True
+  return False
 
 def script_exec(code, context = {}, to_dict = False):
   # TODO Supporto per altri linguaggi

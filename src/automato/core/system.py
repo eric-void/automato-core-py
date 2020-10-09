@@ -263,7 +263,7 @@ def _stats_show():
     '  system_stats:\n{stats}').format(
     total = round(total / 60000),
     delay = mqtt.queueDelay(),
-    schits = scripting_js.script_eval_cache_hits, sctotal = scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss, scperc = round(scripting_js.script_eval_cache_hits * 100 / (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss)) if (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss) > 0 else 0, scsize = len(scripting_js.script_eval_cache), scskip =  scripting_js.script_eval_cache_skipped, scdisabled = scripting_js.script_eval_cache_disabled, scsign = scripting_js.script_eval_codecontext_signatures,
+    schits = scripting_js.script_eval_cache_hits, sctotal = scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss, scperc = round(scripting_js.script_eval_cache_hits * 100 / (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss)) if (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss) > 0 else 0, scsize = len(scripting_js.script_eval_cache), scskip =  scripting_js.script_eval_cache_skipped, scdisabled = scripting_js.script_eval_cache_disabled, scsign = len(scripting_js.script_eval_codecontext_signatures),
     tphits = index_topic_cache['hits'], tptotal = index_topic_cache['hits'] + index_topic_cache['miss'], tpperc = round(index_topic_cache['hits'] * 100 / (index_topic_cache['hits'] + index_topic_cache['miss'])) if (index_topic_cache['hits'] + index_topic_cache['miss']) > 0 else 0, tpsize = sum([len(index_topic_cache['data'][i]) for i in index_topic_cache['data']]),
     stats = stats
   ))
