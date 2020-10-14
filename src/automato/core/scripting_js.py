@@ -39,6 +39,10 @@ def script_context(context = {}):
     'd': utils.read_duration,
     't': _parse_datetime,
     'strftime': _strftime,
+    'array_sum': utils.array_sum,
+    'array_avg': utils.array_avg,
+    'array_min': utils.array_min,
+    'array_max': utils.array_max,
     'print': _print,
     '_': _translate,
     
@@ -139,7 +143,7 @@ def _script_eval_int(code, context = {}, cache = False):
           return script_eval_cache[keyhash]['result']
       script_eval_cache_miss += 1
       
-      logging.debug("scripting> SCRIPT EVAL CACHE MISSED: " + key)
+      #logging.debug("scripting> SCRIPT EVAL CACHE MISSED: " + key)
       
     else:
       script_eval_cache_skipped += 1
@@ -164,7 +168,6 @@ def _script_eval_int(code, context = {}, cache = False):
     logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
   finally:
     system._stats_end('scripting_js.script_eval(js2py)', _s)
-    
 
 def _script_code_uses_full_var(code, var):
   """

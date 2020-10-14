@@ -134,3 +134,35 @@ def b64_decompress_data(string):
   except:
     logging.exception("utils.b64_decompress_data> Error decompressing: " + str(string))
     return None
+
+def array_sum(a):
+  res = 0
+  c = 0
+  for i in a:
+    if i is not None:
+      res = res + i
+      c = c + 1
+  return res / c if c > 0 else None
+  
+def array_avg(a):
+  res = 0
+  c = 0
+  for i in a:
+    if i is not None:
+      res = res + i
+      c = c + 1
+  return res if c > 0 else None
+
+def array_min(a):
+  res = None
+  for i in a:
+    if i is not None and (res is None or i < res):
+      res = i
+  return res
+
+def array_max(a):
+  res = None
+  for i in a:
+    if i is not None and (res is None or i > res):
+      res = i
+  return res
