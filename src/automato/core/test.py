@@ -237,7 +237,8 @@ def assertDone(unitname, timeout = False):
 
 def on_all_mqtt_messages(message):
   global assertsRunning, checks
-  events = message.events()
+  eventsdata = message.events()
+  events = {e['name']: e['params'] for e in eventsdata}
   
   delete = []
   for check in checks:
@@ -247,17 +248,18 @@ def on_all_mqtt_messages(message):
         delete.append(check)
       elif unitname:
         if 'events' in check and check['events']:
-          eventdata = {k: events[k]['params'] for k in events} if not check['eventsdata'] else events
-          _assertsRunningDone(unitname, 'events', _data_match(eventdata, check['events']), 'received: ' + str(eventdata) + ', want: ' + str(check['events']))
+          if check['eventsdata']:
+            _assertsRunningDone(unitname, 'events', _data_match(eventsdata, check['events']), 'received: ' + str(eventsdata) + ', want: ' + str(check['events']))
+          else:
+            _assertsRunningDone(unitname, 'events', _data_match(events, check['events']), 'received: ' + str(events) + ', want: ' + str(check['events']))
           delete.append(check)
         elif 'some_events' in check and check['some_events']:
-          eventdata = {k: events[k]['params'] for k in events} if not check['eventsdata'] else events
           match = True
           for e in check['some_events']:
-            if not e in eventdata or not _data_match(eventdata[e], check['some_events'][e]):
+            if not e in events or not _data_match(events[e], check['some_events'][e]):
               match = False
               break
-          _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(eventdata) + ', want (some): ' + str(check['some_events']))
+          _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(events) + ', want (some): ' + str(check['some_events']))
           delete.append(check)
         elif 'payload' in check:
           _assertsRunningDone(unitname, 'subscribe_payload', _data_match(message.payload, check['payload']), 'received: ' + str(message.payload) + ', want: ' + str(check['payload']))
