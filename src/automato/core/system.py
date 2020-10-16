@@ -488,7 +488,7 @@ def _on_events_passthrough_listener_lambda(source_entry):
   return lambda entry, eventname, eventdata: _on_events_passthrough_listener(source_entry, entry, eventname, eventdata)
   
 def _on_events_passthrough_listener(source_entry, entry, eventname, eventdata):
-  _entry_event_publish_and_invoke_listeners(source_entry, '#events_passthrough', eventname, eventdata['params'], eventdata['time'])
+  _entry_event_publish_and_invoke_listeners(source_entry, eventname, eventdata['params'], eventdata['time'], '#events_passthrough')
 
 """
 Extract the exportable portion [L.0]+[L.0N] of the full entry definition
@@ -1031,7 +1031,7 @@ class PublishedMessage(object):
             _stats_end('PublishedMessages.event_process', _s)
             if event:
               _s = _stats_start()
-              eventdata = _entry_event_publish(self.entry, self.topic_rule, event['name'], event['params'], time() if not self.message.retain else 0)
+              eventdata = _entry_event_publish(self.entry, event['name'], event['params'], time() if not self.message.retain else 0)
               _stats_end('PublishedMessages.event_publish', _s)
               self._events[event['name']] = eventdata
     return self._events
@@ -1118,9 +1118,9 @@ def _entry_event_process(entry, eventname, eventdef, published_message):
 def _entry_transform_payload(entry, topic, payload, transformdef):
   return scripting_js.script_eval(transformdef, {"topic": topic, "payload": payload}, to_dict = True, cache = True)
 
-def _entry_event_publish(entry, entry_topic, eventname, params, time):
+def _entry_event_publish(entry, eventname, params, time):
   """
-  Given an event generated (by a published messaged, or by and event passthrough), process it's params to generate event data and store it's content in events_published history var
+  Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in events_published history var
   @param time timestamp event has been published, or 0 if from a retained message
   """
   global events_published, events_published_lock
@@ -1133,9 +1133,9 @@ def _entry_event_publish(entry, entry_topic, eventname, params, time):
   
   with events_published_lock:
     # Extract changed params (from previous event detected)
-    if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id] and entry_topic in events_published[eventname][entry.id][params_key]:
+    if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id]:
       for k in params:
-        if k not in events_published[eventname][entry.id][params_key][entry_topic]['params'] or params[k] != events_published[eventname][entry.id][params_key][entry_topic]['params'][k]:
+        if k not in events_published[eventname][entry.id][params_key]['params'] or params[k] != events_published[eventname][entry.id][params_key]['params'][k]:
           result['changed_params'][k] = params[k]
     else:
       result['changed_params'] = params
@@ -1145,9 +1145,7 @@ def _entry_event_publish(entry, entry_topic, eventname, params, time):
         events_published[eventname] = {}
       if not entry.id in events_published[eventname]:
         events_published[eventname][entry.id] = {}
-      if not params_key in events_published[eventname][entry.id]:
-        events_published[eventname][entry.id][params_key] = {}
-      events_published[eventname][entry.id][params_key][entry_topic] = events_published[eventname][entry.id][params_key]["*"] = events_published[eventname]['*'] = result
+      events_published[eventname][entry.id][params_key] = events_published[eventname]['*'] = result
   
   return result
 
@@ -1170,13 +1168,10 @@ def event_get_invalidate_on_action(entry, action, full_params, if_event_not_matc
 
       to_delete = []
       for params_key in events_published[eventname][entry.id]:
-        for topic in events_published[eventname][entry.id][params_key]:
-          if not condition or _entry_event_params_match_condition(events_published[eventname][entry.id][params_key][topic], condition):
-            to_delete.append([params_key, topic])
+        if not condition or _entry_event_params_match_condition(events_published[eventname][entry.id][params_key], condition):
+          to_delete.append(params_key)
       for i in to_delete:
-        del events_published[eventname][entry.id][i[0]][i[1]]
-        if not len(events_published[eventname][entry.id][i[0]]):
-          del events_published[eventname][entry.id][i[0]]
+        del events_published[eventname][entry.id][i]
 
 def _entry_event_invoke_listeners(entry, eventname, eventdata, caller, published_message = None):
   """
@@ -1208,10 +1203,10 @@ def _entry_event_params_match_condition(eventdata, condition):
   """
   return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, cache = True)
 
-def _entry_event_publish_and_invoke_listeners(entry, entry_topic, eventname, params, time):
-  # @param entry_topic is "#events_passthrough" in case of events_passthrough
-  eventdata = _entry_event_publish(entry, entry_topic, eventname, params, time)
-  _entry_event_invoke_listeners(entry, eventname, eventdata, 'events_passthrough' if entry_topic == '#events_passthrough' else None)
+def _entry_event_publish_and_invoke_listeners(entry, eventname, params, time, caller):
+  # @param caller is "#events_passthrough" in case of events_passthrough
+  eventdata = _entry_event_publish(entry, eventname, params, time)
+  _entry_event_invoke_listeners(entry, eventname, eventdata, caller)
 
 
 
@@ -1567,21 +1562,12 @@ def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeo
     match = None
     if eventname in events_published and entry_id in events_published[eventname]:
       for params_key in events_published[eventname][entry_id]:
-        if topic is None or topic in events_published[eventname][entry_id][params_key]:
-          e = events_published[eventname][entry_id][params_key]["*"] if topic is None else events_published[eventname][entry_id][params_key][topic]
-          if (timeout is None or time() - e['time'] <= utils.read_duration(timeout)) and (condition is None or _entry_event_params_match_condition(e, condition)) and (not match or e['time'] > match['time']):
-            match = e;
+        e = events_published[eventname][entry_id][params_key]
+        if (timeout is None or time() - e['time'] <= utils.read_duration(timeout)) and (condition is None or _entry_event_params_match_condition(e, condition)) and (not match or e['time'] > match['time']):
+          match = e;
   if match:
     ret = (match['params'], ) if keys is None else tuple(match['time'] if k == '_time' else (match['params'][k] if k in match['params'] else None) for k in keys)
     return ret[0] if len(ret) <= 1 else ret
-  """
-    if eventname in events_published and entry_id in events_published[eventname] and (topic is None or topic in events_published[eventname][entry_id]):
-      e = events_published[eventname][entry_id]["*"] if topic is None else events_published[eventname][entry_id][topic]
-      if timeout is None or time() - e['time'] <= utils.read_duration(timeout):
-        if condition is None or _entry_event_params_match_condition(e, condition):
-          ret = (e['params'], ) if keys is None else tuple(e['time'] if k == '_time' else (e['params'][k] if k in e['params'] else None) for k in keys)
-          return ret[0] if len(ret) <= 1 else ret
-  """
 
   return None if keys is None or len(keys) == 1 else tuple(None for k in keys)
 
@@ -1600,7 +1586,7 @@ def entry_events_published(entry_or_id):
       res[eventname] = []
       if eventname in events_published and entry.id in events_published[eventname]:
         for params_key in events_published[eventname][entry.id]:
-          res[eventname].append(events_published[eventname][entry.id][params_key]["*"])
+          res[eventname].append(events_published[eventname][entry.id][params_key])
   return res;
 
 def events_import(data, mode = 0):
@@ -1621,18 +1607,14 @@ def events_import(data, mode = 0):
             events_published[eventname] = {}
           if not entry_id in events_published[eventname]:
             events_published[eventname][entry_id] = {}
-          if not params_key in events_published[eventname][entry_id]:
-            events_published[eventname][entry_id][params_key] = {}
-          prevdata = events_published[eventname][entry_id][params_key]["*"] if "*" in this.events_published[eventname][entry_id][params_key] else None
+          prevdata = events_published[eventname][entry_id][params_key] if params_key in this.events_published[eventname][entry_id] else None
           go = mode == 3 or (not prevdata) or ((not prevdata['time']) and eventdata['time'] > 0)
           if (not go) and mode == 1:
             go = eventdata['time'] >= prevdata['time']
           if (not go) and mode == 2:
             go = prevdata['time'] >= 0
           if go:
-            events_published[eventname][entry.id][params_key]["*"] = events_published[eventname]['*'] = eventdata
-            # TODO WARN entry_topic is not passed in exported events, so i could not fill entry_topic reference (and so entry_event_get(topic = '...') will not work)
-            # events_published[eventname][entry.id][params_key][entry_topic] = ???
+            events_published[eventname][entry.id][params_key] = events_published[eventname]['*'] = eventdata
             _entry_event_invoke_listeners(entry_get(entry_id), eventname, eventdata, 'import');
 
 def events_export():
