@@ -130,6 +130,19 @@ def test_init():
           "./action": { "type": "object", "actions": { "data-set": "js:params" } }
         }
       },
+
+      ####################################################################################
+      ### TEST multiple events / event:init
+      {
+        "item": "entry_e",
+        "events_listen": [ ".data" ],
+        "publish": {
+          "./event": { "type": "object", "events": { 
+            "data": ["js:(payload)","js:({'port': '1', 'value': 1})"],
+            "data:init": [{ "port": "1", "unit": "A"}, { "port": "2", "unit": "B" }],
+          } }
+        },
+      },
     ]
   })
 
@@ -154,8 +167,8 @@ def test_run(entries):
     test.assertPublish('s8', 'subs/entry_b/test_do', 2, assertSubscribe = { 'entry_b/test_do_result': '3' })
     
     # Test changed_params
-    test.assertPublish('s9', 'entry_b/pub1', '', assertEventsData = True, assertEvents = {'test_event': {'params': {'port': '1'}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ('*',)}})
-    test.assertPublish('s10', 'entry_b/pub1', '1', assertEventsData = True, assertEvents = {'test_event': {'params': {'port': '11'}, 'changed_params': {'port': '11'}, 'keys': {'port': '11'}, 'time': ('*',)}})
+    test.assertPublish('s9', 'entry_b/pub1', '', assertEventsData = True, assertEvents = [{'name': 'test_event', 'params': {'port': '1'}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ('*',)}])
+    test.assertPublish('s10', 'entry_b/pub1', '1', assertEventsData = True, assertEvents = [{'name': 'test_event', 'params': {'port': '11'}, 'changed_params': {}, 'keys': {'port': '11'}, 'time': ('*',)}])
   
   ####################################################################################
   ### TEST event_get cache e event_params_keys
@@ -207,22 +220,39 @@ def test_run(entries):
       (system.event_get("entry_c.data(js:params['port'] == '2')"), { 'port': '2', 'value': 7 }),
     ])
     # test event_params_keys definition (different cache for 'myport' param and NOT for 'port')
-    test.assertPublish('e9', 'item/entry_d/event', { 'myport': '1', 'port': 5 }, assertEvents = {'data': { 'myport': '1', 'port': 5 } })
+    # also test for cumulative data of events and temporary
+    test.assertPublish('e9', 'item/entry_d/event', { 'myport': '1', 'port': 5, 'cumulated': 9 }, assertEvents = {'data': { 'myport': '1', 'port': 5, 'cumulated': 9 } })
     test.assertx('e10', assertEq=[
-      (system.event_get("entry_d.data"), { 'myport': '1', 'port': 5 }),
-      (system.event_get("entry_d.data(js:params['myport'] == '1')"), { 'myport': '1', 'port': 5 }),
+      (system.event_get("entry_d.data"), { 'myport': '1', 'port': 5, 'cumulated': 9 }),
+      (system.event_get("entry_d.data(js:params['myport'] == '1')"), { 'myport': '1', 'port': 5, 'cumulated': 9 }),
       (system.event_get("entry_d.data(js:params['myport'] == '2')"), None),
-      (system.event_get("entry_d.data(js:params['port'] == 5)"), { 'myport': '1', 'port': 5 }),
+      (system.event_get("entry_d.data(js:params['port'] == 5)"), { 'myport': '1', 'port': 5, 'cumulated': 9 }),
     ])
     test.assertPublish('e11', 'item/entry_d/event', { 'myport': '2', 'port': 6 }, assertEvents = {'data': { 'myport': '2', 'port': 6 } })
-    test.assertPublish('e11', 'item/entry_d/event', { 'myport': '1', 'port': 6 }, assertEvents = {'data': { 'myport': '1', 'port': 6 } })
-    test.assertx('e12', assertEq=[
-      (system.event_get("entry_d.data"), { 'myport': '1', 'port': 6 }),
-      (system.event_get("entry_d.data(js:params['myport'] == '1')"), { 'myport': '1', 'port': 6 }),
+    test.assertPublish('e12', 'item/entry_d/event', { 'myport': '1', 'port': 6 }, assertEvents = {'data': { 'myport': '1', 'port': 6, 'cumulated': 9 } })
+    test.assertx('e13', assertEq=[
+      (system.event_get("entry_d.data"), { 'myport': '1', 'port': 6, 'cumulated': 9 }),
+      (system.event_get("entry_d.data(js:params['myport'] == '1')"), { 'myport': '1', 'port': 6, 'cumulated': 9 }),
+      (system.event_get("entry_d.data(js:params['myport'] == '1')", temporary = True), None),
       (system.event_get("entry_d.data(js:params['myport'] == '2')"), { 'myport': '2', 'port': 6 }),
       (system.event_get("entry_d.data(js:params['port'] == 5)"), None),
     ])
+    test.assertPublish('e14', 'item/entry_d/event', { 'myport': '1', 'port': 7, 'temporary': True }, assertEvents = {'data': { 'myport': '1', 'port': 7, 'cumulated': 9, 'temporary': True } })
+    test.assertx('e15', assertEq=[
+      (system.event_get("entry_d.data"), { 'myport': '1', 'port': 6, 'cumulated': 9 }),
+      (system.event_get("entry_d.data(js:params['myport'] == '1')"), { 'myport': '1', 'port': 6, 'cumulated': 9 }),
+      (system.event_get("entry_d.data(js:params['myport'] == '1')", temporary = True), { 'myport': '1', 'port': 7, 'cumulated': 9, 'temporary': True }),
+      (system.event_get("entry_d.data(js:params['myport'] == '2')"), { 'myport': '2', 'port': 6 }),
+    ])
   
+  ####################################################################################
+  ### TEST multiple events / event:init
+  
+  if (True):
+    test.assertPublish('e16', 'item/entry_e/event', { 'x': 'y', 'port': '2' }, assertEventsData = True, assertEvents = [{'name': 'data', 'params': {'port': '2', 'x': 'y', 'unit': 'B'}, 'changed_params': {'x': 'y'}, 'keys': {'port': '2'}, 'time': ()}, {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A'}, 'changed_params': {'value': 1}, 'keys': {'port': '1'}, 'time': ()}])
+    
+    
+    
   ####################################################################################
   ### TEST topic_matches
   
@@ -269,13 +299,13 @@ def on_subscribed_message(entry, subscribed_message):
   firstpm = subscribed_message.message.firstPublishedMessage()
   source_entry = firstpm.entry if firstpm else None
   listened_events = subscribed_message.message.events()
-  test.assertChild('entry_b_on_subscribed_message', assertEq = [(entry.id, "entry_b@TEST"), (subscribed_message.payload, "test10"), (subscribed_message.matches, []), (source_entry, None), (listened_events, {})])
+  test.assertChild('entry_b_on_subscribed_message', assertEq = [(entry.id, "entry_b@TEST"), (subscribed_message.payload, "test10"), (subscribed_message.matches, []), (source_entry, None), (listened_events, [])])
 
 def on_subscribed_message2(entry, subscribed_message):
   firstpm = subscribed_message.message.firstPublishedMessage()
   source_entry = firstpm.entry if firstpm else None
   listened_events = subscribed_message.message.events()
-  eventsp = {k: listened_events[k]['params'] for k in listened_events}
+  eventsp = {k['name']: k['params'] for k in listened_events}
   test.assertChild('entry_b_on_subscribed_message2', assertEq = [(entry.id, "entry_b@TEST"), (subscribed_message.payload, "test10X"), (subscribed_message.matches, ['subs/entry_b/TEST0X', '0X']), (source_entry.id if source_entry else "-", "entry_b@TEST"), (eventsp, {'test_action_call': {'value': 'test10X'}})])
 
 def publish(entry, topic_rule, topic_definition):

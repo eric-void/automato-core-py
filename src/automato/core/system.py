@@ -297,6 +297,7 @@ class Entry(object):
     self.definition = definition
     self.caption = self.definition['caption'] if 'caption' in self.definition else self.id_local
     self.created = time()
+    self.last_seen = 0
     self.exports = exports
     self.topic_rule_aliases = {}
     self.topic = entry_topic_lambda(self)
@@ -989,9 +990,9 @@ class Message(object):
   
   def events(self):
     if self._events is None:
-      self._events = {}
+      self._events = []
       for pm in self.publishedMessages():
-        self._events = { **self._events, **pm.events()}
+        self._events += pm.events()
     return self._events
   
   def copy(self):
@@ -1021,19 +1022,22 @@ class PublishedMessage(object):
   def events(self):
     if self._events is None:
       global events_listeners, config
-      self._events = {}
+      self._events = []
       
       if 'events' in self.definition:
         for eventname in self.definition['events']:
-          if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname])):
-            _s = _stats_start()
-            event = _entry_event_process(self.entry, eventname, self.definition['events'][eventname], self)
-            _stats_end('PublishedMessages.event_process', _s)
-            if event:
-              _s = _stats_start()
-              eventdata = _entry_event_publish(self.entry, event['name'], event['params'], time() if not self.message.retain else 0)
-              _stats_end('PublishedMessages.event_publish', _s)
-              self._events[event['name']] = eventdata
+          if ":" not in eventname:
+            eventdefs = self.definition['events'][eventname] if isinstance(self.definition['events'][eventname], list) else [ self.definition['events'][eventname] ]
+            for eventdef in eventdefs:
+              if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname])):
+                _s = _stats_start()
+                event = _entry_event_process(self.entry, eventname, eventdef, self)
+                _stats_end('PublishedMessages.event_process', _s)
+                if event:
+                  _s = _stats_start()
+                  eventdata = _entry_event_publish(self.entry, event['name'], event['params'], time() if not self.message.retain else 0)
+                  _stats_end('PublishedMessages.event_publish', _s)
+                  self._events.append(eventdata)
     return self._events
   
   def _notificationBuild(self):
@@ -1084,9 +1088,9 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
   # invoke events listeners
   _s = _stats_start()
   for pm in m.publishedMessages():
-    events = pm.events()
-    for eventname in events:
-      _entry_event_invoke_listeners(pm.entry, eventname, events[eventname], 'message', pm)
+    pm.entry.last_seen = int(timems / 1000)
+    for eventdata in pm.events():
+      _entry_event_invoke_listeners(pm.entry, eventdata, 'message', pm)
   _stats_end('on_mqtt_message.invoke_listeners', _s)
   _stats_end('on_mqtt_message(' + str(topic) + ').invoke_listeners', _s)
   
@@ -1121,31 +1125,39 @@ def _entry_transform_payload(entry, topic, payload, transformdef):
 def _entry_event_publish(entry, eventname, params, time):
   """
   Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in events_published history var
-  @param time timestamp event has been published, or 0 if from a retained message
+  @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
   """
   global events_published, events_published_lock
   #logging.debug("SYSTEM> Published event " + entry.id + "." + eventname + " = " + str(params))
   
-  result = { 'time': time, 'params': params, 'changed_params': {}, 'keys': {} }
-  event_params_keys = entry.definition['event_params_keys'] if 'event_params_keys' in entry.definition else ENTRY_EVENT_PARAMS_KEYS
+  result = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} }
+  event_params_keys = entry.events_keys[eventname] if eventname in entry.events_keys else (entry.definition['event_params_keys'] if 'event_params_keys' in entry.definition else ENTRY_EVENT_PARAMS_KEYS)
   result['keys'] = {k:params[k] for k in event_params_keys if params and k in params}
   params_key = utils.json_sorted_encode(result['keys'])
   
   with events_published_lock:
-    # Extract changed params (from previous event detected)
-    if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id]:
-      for k in params:
-        if k not in events_published[eventname][entry.id][params_key]['params'] or params[k] != events_published[eventname][entry.id][params_key]['params'][k]:
-          result['changed_params'][k] = params[k]
-    else:
-      result['changed_params'] = params
+    if time >= 0:
+      # Extract changed params (from previous event detected)
+      if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id]:
+        for k in params:
+          if k not in event_params_keys and (k not in events_published[eventname][entry.id][params_key]['params'] or params[k] != events_published[eventname][entry.id][params_key]['params'][k]):
+            result['changed_params'][k] = params[k]
+        for k in events_published[eventname][entry.id][params_key]['params']:
+          if k not in params:
+            params[k] = events_published[eventname][entry.id][params_key]['params'][k]
+      else:
+        for k in params:
+          if k not in event_params_keys:
+            result['changed_params'][k] = params[k]
     
-    if (not isinstance(params, dict)) or ('temporary' not in params) or (not params['temporary']):
-      if not eventname in events_published:
-        events_published[eventname] = {}
-      if not entry.id in events_published[eventname]:
-        events_published[eventname][entry.id] = {}
-      events_published[eventname][entry.id][params_key] = events_published[eventname]['*'] = result
+    if not eventname in events_published:
+      events_published[eventname] = {}
+    if not entry.id in events_published[eventname]:
+      events_published[eventname][entry.id] = {}
+    if (time < 0) or (not isinstance(params, dict)) or ('temporary' not in params) or (not params['temporary']):
+      events_published[eventname][entry.id][params_key] = result
+    elif 'temporary' in params and params['temporary']:
+      events_published[eventname][entry.id]["T:" + params_key] = result
   
   return result
 
@@ -1163,7 +1175,7 @@ def event_get_invalidate_on_action(entry, action, full_params, if_event_not_matc
       if if_event_not_match_decoded:
         condition = if_event_not_match_decoded['condition']
       else:
-        event_params_keys = entry.definition['event_params_keys'] if 'event_params_keys' in entry.definition else ENTRY_EVENT_PARAMS_KEYS
+        event_params_keys = entry.events_keys[eventname] if eventname in entry.events_keys else (entry.definition['event_params_keys'] if 'event_params_keys' in entry.definition else ENTRY_EVENT_PARAMS_KEYS)
         condition = " && ".join([ "params['" + k + "'] == " + json.dumps(full_params[k]) for k in event_params_keys if full_params and k in full_params])
 
       to_delete = []
@@ -1173,7 +1185,7 @@ def event_get_invalidate_on_action(entry, action, full_params, if_event_not_matc
       for i in to_delete:
         del events_published[eventname][entry.id][i]
 
-def _entry_event_invoke_listeners(entry, eventname, eventdata, caller, published_message = None):
+def _entry_event_invoke_listeners(entry, eventdata, caller, published_message = None):
   """
   Call this method when an entry should emit an event
   This invokes the event listeners of the entry
@@ -1181,7 +1193,8 @@ def _entry_event_invoke_listeners(entry, eventname, eventdata, caller, published
   """
   global events_listeners, handler_on_all_events
   
-  #logging.debug("_entry_event_invoke_listeners " + str(eventname) + " | " + str(eventdata) + " | " + str(events_listeners))
+  #logging.debug("_entry_event_invoke_listeners " + str(eventdata) + " | " + str(events_listeners))
+  eventname = eventdata['name']
   if eventname in events_listeners:
     for entry_ref in events_listeners[eventname]:
       if entry_ref == '*' or entry_id_match(entry, entry_ref):
@@ -1206,7 +1219,7 @@ def _entry_event_params_match_condition(eventdata, condition):
 def _entry_event_publish_and_invoke_listeners(entry, eventname, params, time, caller):
   # @param caller is "#events_passthrough" in case of events_passthrough
   eventdata = _entry_event_publish(entry, eventname, params, time)
-  _entry_event_invoke_listeners(entry, eventname, eventdata, caller)
+  _entry_event_invoke_listeners(entry, eventdata, caller)
 
 
 
@@ -1388,12 +1401,20 @@ def _entry_events_install(entry):
   Initializes events for entry entry
   """
   entry.events = {}
+  entry.events_keys = {}
   for topic in entry.definition['publish']:
     if 'events' in entry.definition['publish'][topic]:
-      for event in entry.definition['publish'][topic]['events']:
-        if not event in entry.events:
-          entry.events[event] = []
-        entry.events[event].append(topic)
+      for eventname in entry.definition['publish'][topic]['events']:
+        if ":" not in eventname:
+          if not eventname in entry.events:
+            entry.events[eventname] = []
+          entry.events[eventname].append(topic)
+        elif eventname.endswith(':keys'):
+          entry.events_keys[eventname[0:-5]] = entry.definition['publish'][topic]['events'][eventname]
+        elif eventname.endswith(':init'):
+          data = entry.definition['publish'][topic]['events'][eventname] if isinstance(entry.definition['publish'][topic]['events'][eventname], list) else [ entry.definition['publish'][topic]['events'][eventname] ]
+          for eventparams in data:
+            _entry_event_publish(entry, eventname[0:-5], eventparams, -1)
 
 def _entry_actions_load(entry):
   entry.do = entry_do_action_lambda(entry)
@@ -1410,14 +1431,14 @@ def _entry_actions_install(entry):
           entry.actions[action] = []
         entry.actions[action].append(topic)
 
-def entry_support_event(entry, event):
+def entry_support_event(entry, eventname):
   if hasattr(entry, 'events'):
-    return event in entry.events
+    return eventname in entry.events
   # If called during "system_loaded" phase, i must cycle through published topics
   if 'publish' in entry.definition:
     for topic in entry.definition['publish']:
       if 'events' in entry.definition['publish'][topic]:
-        if event in entry.definition['publish'][topic]['events']:
+        if eventname in entry.definition['publish'][topic]['events'] and (":" not in eventname):
           return True
   return False
 
@@ -1537,42 +1558,43 @@ def entry_do_action(entry_or_id, action, params = {}, init = None, if_event_not_
 
   return False
 
-def event_get(eventref, timeout = None, keys = None, topic = None):
+def event_get(eventref, timeout = None, keys = None, temporary = False):
   d = decode_event_reference(eventref)
   if d:
-    return entry_event_get(d['entry'], d['event'], condition = d['condition'], timeout = timeout, keys = keys, topic = topic)
+    return entry_event_get(d['entry'], d['event'], condition = d['condition'], timeout = timeout, keys = keys, temporary = temporary)
   else:
     logging.error("#SYSTEM> Invalid event reference {eventref}".format(eventref = eventref))
 
-def event_get_time(eventref, timeout = None, topic = None):
-  return event_get(eventref, timeout = timeout, keys = ['_time'], topic = topic)
+def event_get_time(eventref, timeout = None, temporary = False):
+  return event_get(eventref, timeout = timeout, keys = ['_time'], temporary = temporary)
 
-def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeout = None, topic = None):
+def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeout = None, temporary = False):
   """
   WARN: You can do an "entry_event_get" only of listened events (referenced in "on" or "events_listen" entry definitions)
 
   @param keys List of event params names to get. Use "_time" as param name to get event time
-  @param topic Restrict to events generated by specific topic published
   @param timeout None or a duration
   """
   global events_published, events_published_lock
-  entry_id = "*" if entry_or_id is None else (entry_id_expand(entry_or_id) if isinstance(entry_or_id, str) else entry.id)
+  entry_id = entry_id_expand(entry_or_id) if isinstance(entry_or_id, str) else entry.id
   
   with events_published_lock:
     match = None
     if eventname in events_published and entry_id in events_published[eventname]:
       for params_key in events_published[eventname][entry_id]:
-        e = events_published[eventname][entry_id][params_key]
-        if (timeout is None or time() - e['time'] <= utils.read_duration(timeout)) and (condition is None or _entry_event_params_match_condition(e, condition)) and (not match or e['time'] > match['time']):
-          match = e;
+        t = params_key.startswith("T:")
+        if (t and temporary) or (not t and not temporary):
+          e = events_published[eventname][entry_id][params_key]
+          if (timeout is None or time() - e['time'] <= utils.read_duration(timeout)) and (condition is None or _entry_event_params_match_condition(e, condition)) and (not match or e['time'] > match['time']):
+            match = e;
   if match:
     ret = (match['params'], ) if keys is None else tuple(match['time'] if k == '_time' else (match['params'][k] if k in match['params'] else None) for k in keys)
     return ret[0] if len(ret) <= 1 else ret
 
   return None if keys is None or len(keys) == 1 else tuple(None for k in keys)
 
-def entry_event_get_time(entry_or_id, eventname, timeout = None, topic = None):
-  entry_event_get(entry_or_id, eventname, ['_time'], topic, timeout)
+def entry_event_get_time(entry_or_id, eventname, timeout = None, temporary = False):
+  entry_event_get(entry_or_id, eventname, ['_time'], timeout, temporary)
 
 def entry_events_published(entry_or_id):
   """
@@ -1601,7 +1623,8 @@ def events_import(data, mode = 0):
   for entry_id in data:
     for eventname in data[entry_id]:
       for eventdata in data[entry_id][eventname]:
-        params_key = utils.json_sorted_encode(eventdata['keys'] if 'keys' in eventdata else {})
+        temporary = "temporary" in eventdata['params'] and eventdata['params']['temporary']
+        params_key = ("T:" if temporary else "") + utils.json_sorted_encode(eventdata['keys'] if 'keys' in eventdata else {})
         with events_published_lock:
           if not eventname in events_published:
             events_published[eventname] = {}
@@ -1614,8 +1637,9 @@ def events_import(data, mode = 0):
           if (not go) and mode == 2:
             go = prevdata['time'] >= 0
           if go:
-            events_published[eventname][entry.id][params_key] = events_published[eventname]['*'] = eventdata
-            _entry_event_invoke_listeners(entry_get(entry_id), eventname, eventdata, 'import');
+            events_published[eventname][entry.id][params_key] = eventdata
+            if eventdata['time'] >= 0 and not temporary:
+              _entry_event_invoke_listeners(entry_get(entry_id), eventdata, 'import');
 
 def events_export():
   global all_entries
