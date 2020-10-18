@@ -1125,41 +1125,61 @@ def _entry_transform_payload(entry, topic, payload, transformdef):
 def _entry_event_publish(entry, eventname, params, time):
   """
   Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in events_published history var
+  Note: if an event has no "event_params_keys", it's data will be setted to all other stored data (of events with params_key). If a new params_key occours, the data will be merged with "no params-key" data.
   @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
   """
   global events_published, events_published_lock
   #logging.debug("SYSTEM> Published event " + entry.id + "." + eventname + " = " + str(params))
   
-  result = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} }
+  data = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} }
   event_params_keys = entry.events_keys[eventname] if eventname in entry.events_keys else (entry.definition['event_params_keys'] if 'event_params_keys' in entry.definition else ENTRY_EVENT_PARAMS_KEYS)
-  result['keys'] = {k:params[k] for k in event_params_keys if params and k in params}
-  params_key = utils.json_sorted_encode(result['keys'])
+  data['keys'] = {k:params[k] for k in event_params_keys if params and k in params}
+  params_key = utils.json_sorted_encode(data['keys'])
+
+  # If this is a new params_key, i must merge data with empty params_key (if present)
+  if params_key != '{}' and eventname in events_published and entry.id in events_published[eventname] and '{}' in events_published[eventname][entry.id] and params_key not in events_published[eventname][entry.id]:
+    for k in events_published[eventname][entry.id]['{}']['params']:
+      if k not in params:
+        params[k] = events_published[eventname][entry.id]['{}']['params'][k]
   
+  __entry_event_publish_store(entry, eventname, params_key, data, time, event_params_keys)
+  
+  # If this is an empty params_key, i must pass data to other stored data with params_key (i can ignore temporary data)
+  if params_key == '{}' and eventname in events_published and entry.id in events_published[eventname]:
+    p = [p for p in events_published[eventname][entry.id] if not p.startswith("T:")]
+    for params_key2 in p:
+      if params_key2 != '{}':
+        data2 = { 'name': eventname, 'time': time, 'params': copy.deepcopy(params), 'changed_params': {}, 'keys': events_published[eventname][entry.id][params_key2]['keys'] }
+        __entry_event_publish_store(entry, eventname, params_key2, data2, time, event_params_keys)
+  
+  return data
+
+def __entry_event_publish_store(entry, eventname, params_key, data, time, event_params_keys):
+  global events_published, events_published_lock
   with events_published_lock:
-    if time >= 0:
-      # Extract changed params (from previous event detected)
-      if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id]:
-        for k in params:
-          if k not in event_params_keys and (k not in events_published[eventname][entry.id][params_key]['params'] or params[k] != events_published[eventname][entry.id][params_key]['params'][k]):
-            result['changed_params'][k] = params[k]
-        for k in events_published[eventname][entry.id][params_key]['params']:
-          if k not in params:
-            params[k] = events_published[eventname][entry.id][params_key]['params'][k]
-      else:
-        for k in params:
-          if k not in event_params_keys:
-            result['changed_params'][k] = params[k]
-    
+    # Extract changed params (from previous event detected)
+    if eventname in events_published and entry.id in events_published[eventname] and params_key in events_published[eventname][entry.id]:
+      for k in data['params']:
+        if k not in event_params_keys and (k not in events_published[eventname][entry.id][params_key]['params'] or data['params'][k] != events_published[eventname][entry.id][params_key]['params'][k]):
+          data['changed_params'][k] = data['params'][k]
+      for k in events_published[eventname][entry.id][params_key]['params']:
+        if k not in data['params']:
+          data['params'][k] = events_published[eventname][entry.id][params_key]['params'][k]
+    else:
+      for k in data['params']:
+        if k not in event_params_keys:
+          data['changed_params'][k] = data['params'][k]
+  
     if not eventname in events_published:
       events_published[eventname] = {}
     if not entry.id in events_published[eventname]:
       events_published[eventname][entry.id] = {}
-    if (time < 0) or (not isinstance(params, dict)) or ('temporary' not in params) or (not params['temporary']):
-      events_published[eventname][entry.id][params_key] = result
-    elif 'temporary' in params and params['temporary']:
-      events_published[eventname][entry.id]["T:" + params_key] = result
+    if (time < 0) or (not isinstance(data['params'], dict)) or ('temporary' not in data['params']) or (not data['params']['temporary']):
+      events_published[eventname][entry.id][params_key] = data
+    elif 'temporary' in data['params'] and data['params']['temporary']:
+      events_published[eventname][entry.id]["T:" + params_key] = data
   
-  return result
+  return data
 
 def event_get_invalidate_on_action(entry, action, full_params, if_event_not_match_decoded = None):
   # Devo invalidare dalla cache di event_get tutti gli eventi che potrebbero essere interessati da questo action
@@ -1426,10 +1446,15 @@ def _entry_actions_install(entry):
   entry.actions = {}
   for topic in entry.definition['subscribe']:
     if 'actions' in entry.definition['subscribe'][topic]:
-      for action in entry.definition['subscribe'][topic]['actions']:
-        if not action in entry.actions:
-          entry.actions[action] = []
-        entry.actions[action].append(topic)
+      for actionname in entry.definition['subscribe'][topic]['actions']:
+        if ":" not in actionname:
+          if not actionname in entry.actions:
+            entry.actions[actionname] = []
+          entry.actions[actionname].append(topic)
+        elif actionname.endswith(':init'):
+          data = entry.definition['subscribe'][topic]['actions'][actionname] if isinstance(entry.definition['subscribe'][topic]['actions'][actionname], list) else [ entry.definition['subscribe'][topic]['actions'][actionname] ]
+          for eventparams in data:
+            _entry_event_publish(entry, 'action/' + actionname[0:-5], eventparams, -1)
 
 def entry_support_event(entry, eventname):
   if hasattr(entry, 'events'):
@@ -1487,14 +1512,14 @@ def entry_on_event(entry, event, listener, condition = None):
   #entry.events_listeners[event].append([listener, condition])
   on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener)
 
-def entry_support_action(entry, action):
+def entry_support_action(entry, actionname):
   if hasattr(entry, 'actions'):
-    return action in entry.actions
+    return actionname in entry.actions
   # If called during "system_loaded" phase, i must cycle through published topics
   if 'subscribe' in entry.definition:
     for topic in entry.definition['subscribe']:
       if 'actions' in entry.definition['subscribe'][topic]:
-        if action in entry.definition['subscribe'][topic]['actions']:
+        if actionname in entry.definition['subscribe'][topic]['actions'] and (":" not in actionname):
           return True
   return False
 

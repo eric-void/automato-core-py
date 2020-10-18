@@ -139,7 +139,7 @@ def test_init():
         "publish": {
           "./event": { "type": "object", "events": { 
             "data": ["js:(payload)","js:({'port': '1', 'value': 1})"],
-            "data:init": [{ "port": "1", "unit": "A"}, { "port": "2", "unit": "B" }],
+            "data:init": [{"all": 1}, { "port": "1", "unit": "A"}, { "port": "2", "unit": "B" }],
           } }
         },
       },
@@ -249,9 +249,24 @@ def test_run(entries):
   ### TEST multiple events / event:init
   
   if (True):
-    test.assertPublish('e16', 'item/entry_e/event', { 'x': 'y', 'port': '2' }, assertEventsData = True, assertEvents = [{'name': 'data', 'params': {'port': '2', 'x': 'y', 'unit': 'B'}, 'changed_params': {'x': 'y'}, 'keys': {'port': '2'}, 'time': ()}, {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A'}, 'changed_params': {'value': 1}, 'keys': {'port': '1'}, 'time': ()}])
-    
-    
+    # this one publish an event {'port': '2', 'x': 'y'} and an event {'port': 1, 'value': 1}
+    test.assertPublish('e16', 'item/entry_e/event', { 'x': 'y', 'port': '2' }, assertEventsData = True, 
+      assertEvents = [
+        {'name': 'data', 'params': {'port': '2', 'x': 'y', 'unit': 'B', 'all': 1}, 'changed_params': {'x': 'y'}, 'keys': {'port': '2'}, 'time': ()},
+        {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A', 'all': 1}, 'changed_params': {'value': 1}, 'keys': {'port': '1'}, 'time': ()}
+      ])
+    # this one publish an event {'z': 3} [with no keys => impact other events with keys] and an event {'port': 1, 'value': 1}
+    test.assertPublish('e17', 'item/entry_e/event', { 'z': 3 }, assertEventsData = True, 
+      assertEvents = [
+        {'name': 'data', 'params': {'all': 1, 'z': 3}, 'changed_params': {'z': 3}, 'keys': {}, 'time': ()},
+        {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A', 'all': 1, 'z': 3}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ()}
+      ])
+    # this one publish an event {'all': 2 } [with no keys => impact other events with keys] and an event {'port': 1, 'value': 1}
+    test.assertPublish('e18', 'item/entry_e/event', { 'all': 2 }, assertEventsData = True, 
+      assertEvents = [
+        {'name': 'data', 'params': {'all': 2, 'z': 3}, 'changed_params': {'all': 2}, 'keys': {}, 'time': ()},
+        {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A', 'all': 2, 'z': 3}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ()}
+      ])
     
   ####################################################################################
   ### TEST topic_matches
