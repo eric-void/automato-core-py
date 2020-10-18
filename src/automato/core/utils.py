@@ -135,23 +135,23 @@ def b64_decompress_data(string):
     logging.exception("utils.b64_decompress_data> Error decompressing: " + str(string))
     return None
 
-def array_sum(a):
+def array_sum(a, decimals = -1):
   res = 0
   c = 0
   for i in a:
     if i is not None:
       res = res + i
       c = c + 1
-  return res if c > 0 else None
+  return (round(res) if decimals >= 0 else res) if c > 0 else None
   
-def array_avg(a):
+def array_avg(a, decimals = -1):
   res = 0
   c = 0
   for i in a:
     if i is not None:
       res = res + i
       c = c + 1
-  return res / c if c > 0 else None
+  return (round(res / c, decimals) if decimals >= 0 else res / c) if c > 0 else None
 
 def array_min(a):
   res = None
