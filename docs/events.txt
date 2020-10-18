@@ -65,3 +65,19 @@ config {
 
 "output:metadata": { value: { type: "int", values: [0, 1] } }
 "clock:metadata": { value: { type: "timestamp" } }
+
+
+
+
+
+
+*:unit:
+- power: W, kW, 
+- energy: Wh, kWh, Wmin
+- current: A
+- voltage: V
+- temperature: °C, °F
+---
+- pressure: hPa
+- humidity: %
+
