@@ -6,6 +6,7 @@ from automato.core import system
 
 def test_init():
   test.add_node_config({
+    "listen_all_events": True,
     "entries": [
       { "module": "scripting" },
       {

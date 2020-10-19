@@ -43,7 +43,11 @@ def script_context(context = {}):
     'array_avg': utils.array_avg,
     'array_min': utils.array_min,
     'array_max': utils.array_max,
+    'round': round,
+    'is_dict': _is_dict,
+    'is_array': _is_array,
     'print': _print,
+    'str': str,
     '_': _translate,
     
     ** exports,
@@ -70,7 +74,7 @@ def script_eval(code, context = {}, to_dict = False):
 def script_eval(code, context = {}, to_dict = False, cache = False):
   _s = system._stats_start()
   ret = _script_eval_int(code, context, cache)
-  if ret and to_dict and ret and isinstance(ret, js2py.base.JsObjectWrapper):
+  if ret and to_dict and isinstance(ret, js2py.base.JsObjectWrapper):
     ret = ret.to_dict()
   system._stats_end('scripting_js.script_eval', _s)
   return ret
@@ -210,3 +214,13 @@ def _translate(v):
 
 def _print(v):
   print(str(v))
+
+def _is_dict(v):
+  if isinstance(v, js2py.base.PyJsObject): # Only "PyJSObject" is correct, NOT PyJs(*)
+    v = v.to_python()
+  if isinstance(v, js2py.base.JsObjectWrapper):
+    v = v.to_dict()
+  return isinstance(v, dict)
+
+def _is_array(v):
+  return isinstance(v, js2py.base.PyJsArray) or isinstance(v, list)
