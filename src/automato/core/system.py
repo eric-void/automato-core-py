@@ -43,7 +43,7 @@ ENTRY_DEFINITION_EXPORTABLE = {
   'events_passthrough': True,
 }
 PRIMITIVE_TYPES = (int, str, bool, float, dict, list)
-ENTRY_EVENT_PARAMS_KEYS = ['port', 'channel']
+ENTRY_EVENT_PARAMS_KEYS = ['port']
 
 index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} }
 INDEX_TOPIC_CACHE_MAXSIZE = 1024
