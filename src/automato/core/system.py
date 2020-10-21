@@ -131,9 +131,10 @@ def _mqtt_connect_callback(callback, phase):
     callback()
 
 def init(callback):
-  global destroyed, config, all_entries, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, index_topic_published, index_topic_subscribed, default_node_name, subscribed_response, subscription_thread
+  global destroyed, config, all_entries, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, index_topic_published, index_topic_subscribed, default_node_name, subscribed_response, subscription_thread
   destroyed = False
   all_entries = {}
+  all_nodes = {}
   exports = {}
   subscriptions = {}
   last_entry_and_events_for_received_mqtt_message = None
@@ -304,7 +305,7 @@ class Entry(object):
     self.publish = entry_publish_lambda(self)
 
 def entry_load(definition, node_name = False, entry_id = False, replace_if_exists = True):
-  global config, default_node_name, all_entries, handler_on_entry_load
+  global config, default_node_name, all_entries, all_nodes, handler_on_entry_load
   if not node_name:
     node_name = default_node_name
   
@@ -342,6 +343,8 @@ def entry_load(definition, node_name = False, entry_id = False, replace_if_exist
   _entry_actions_load(entry)
   
   all_entries[entry_id] = entry
+  if entry.node_name not in all_nodes:
+    all_nodes[entry.node_name] = {}
 
   return entry
 
@@ -590,19 +593,36 @@ def entry_definition_add_default(entry, default):
   entry.definition = utils.dict_merge(default, entry.definition)
 
 def entry_id_match(entry, reference):
-  return (entry.id == reference) or (reference.find("@") < 0 and entry.is_local and entry.id_local == reference)
+  """
+  Return if the id of the entry (reference) matches the one on the entry
+  If the reference has no "@", only the local part is matched (so, if there are more entries with the same local part, every one of these is matched)
+  """
+  #OBSOLETE: return (entry.id == reference) or (reference.find("@") < 0 and entry.is_local and entry.id_local == reference)
+  return (entry.id == reference) or (reference.find("@") < 0 and entry.id_local == reference)
 
-def entry_id_expand(entry_id):
-  global default_node_name
-  return entry_id + '@' + default_node_name if entry_id != "*" and entry_id.find("@") < 0 else entry_id
+def entry_id_find(entry_id):
+  #OBSOLETE: global default_node_name
+  #OBSOLETE: return entry_id + '@' + default_node_name if entry_id != "*" and entry_id.find("@") < 0 else entry_id
+  global all_nodes, all_entries
+  if entry_id == "*" or entry_id.find("@") >= 0:
+    return entry_id
+  for node_name in all_nodes:
+    if (entry_id + "@" + node_name) in all_entries:
+      return entry_id + "@" + node_name
+  return None
 
 def entry_get(entry_id, local = False):
+  """
+  OBSOLETE (with parameter local = False)
   global all_entries, default_node_name
   d = entry_id.find("@")
   if d < 0:
     return all_entries[entry_id + '@' + default_node_name] if entry_id + '@' + default_node_name in all_entries else None
-  #return all_entries[entry_id[:d]] if entry_id[d + 1:] == default_node_name and entry_id[:d] in all_entries else None
   return all_entries[entry_id] if entry_id in all_entries and (not local or all_entries[entry_id].is_local) else None
+  """
+  global all_entries
+  eid = entry_id_find(entry_id)
+  return all_entries[eid] if eid else None
 
 def entries_definition_exportable():
   global all_entries
@@ -1029,7 +1049,7 @@ class PublishedMessage(object):
           if ":" not in eventname:
             eventdefs = self.definition['events'][eventname] if isinstance(self.definition['events'][eventname], list) else [ self.definition['events'][eventname] ]
             for eventdef in eventdefs:
-              if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname])):
+              if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname] or self.entry.id_local in events_listeners[eventname])):
                 _s = _stats_start()
                 event = _entry_event_process(self.entry, eventname, eventdef, self)
                 _stats_end('PublishedMessages.event_process', _s)
@@ -1485,7 +1505,7 @@ def on_event(eventref, listener = None, reference_entry = None, reference_tag = 
   else:
     if not d['event'] in events_listeners:
       events_listeners[d['event']] = {}
-    d['entry'] = entry_id_expand(d['entry'])
+    #OBSOLETE: d['entry'] = entry_id_expand(d['entry'])
     if not d['entry'] in events_listeners[d['event']]:
       events_listeners[d['event']][d['entry']] = []
     if listener:
@@ -1507,9 +1527,6 @@ def entry_on_event(entry, event, listener, condition = None):
   @param listener a callback, defined as listener(entry, eventname, eventdata)
   @param condition javascript condition to match event. Example: "port = 1 && value < 10"
   """
-  #if not event in entry.events_listeners:
-  #  entry.events_listeners[event] = []
-  #entry.events_listeners[event].append([listener, condition])
   on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener)
 
 def entry_support_action(entry, actionname):
@@ -1601,7 +1618,7 @@ def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeo
   @param timeout None or a duration
   """
   global events_published, events_published_lock
-  entry_id = entry_id_expand(entry_or_id) if isinstance(entry_or_id, str) else entry.id
+  entry_id = entry_id_find(entry_or_id) if isinstance(entry_or_id, str) else entry.id
   
   with events_published_lock:
     match = None
@@ -1640,7 +1657,7 @@ def events_import(data, mode = 0):
   global events_published, events_published_lock
   
   """
-  @param mode = 0 only import events not present, or with time = 0
+  @param mode = 0 only import events not present, or with time = -1|0
   @param mode = 1 ... also events with time >= than the one in memory
   @param mode = 2 ... also all events with time > 0
   @param mode = 3 import all events (even if time = 0)
@@ -1656,11 +1673,11 @@ def events_import(data, mode = 0):
           if not entry_id in events_published[eventname]:
             events_published[eventname][entry_id] = {}
           prevdata = events_published[eventname][entry_id][params_key] if params_key in this.events_published[eventname][entry_id] else None
-          go = mode == 3 or (not prevdata) or ((not prevdata['time']) and eventdata['time'] > 0)
+          go = mode == 3 or (not prevdata) or (prevdata['time'] <= 0 and eventdata['time'] > 0)
           if (not go) and mode == 1:
             go = eventdata['time'] >= prevdata['time']
           if (not go) and mode == 2:
-            go = prevdata['time'] >= 0
+            go = eventdata['time'] > 0
           if go:
             events_published[eventname][entry.id][params_key] = eventdata
             if eventdata['time'] >= 0 and not temporary:
