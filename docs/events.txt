@@ -4,7 +4,7 @@ Naming conventions:
 Common parameters:
 - port: if a device control several sub-devices (for example, a sonoff dual controls 2 separate relays) they are detected as "ports"
 - channel: if a device has different method to call the same device or sub-device(port), it uses different channels. For example, for a button, you could have "single-press" and "longpress" as 2 different channels
-- *_unit: identifies the unit used by that parameter. For example. power:1, power_unit: "W". For "value" you can simply use "unit". Ex: temperature: { value: 20, unit: "C" }
+- *:unit: identifies the unit used by that parameter. For example. power:1, power:unit: "W". For "value" you can simply use "unit". Ex: temperature: { value: 20, unit: "C" }
 - *_reported: if the event manipulates the value reported by the device in some way, it can set the original value, as reported by the device, in this parameter
 - temporary: event should be considered temporary, after a while the event state will revert back to previous state. Events with temporary set to a number != 0 or to a boolean != False should NOT be cached, and event_get calls should return previous state. Used, for example, with push buttons
 - source: sometimes it could be useful to declare data source (the module that generated the data, or the website, or the generic "data source")
@@ -29,8 +29,8 @@ Events/actions:
 - temperature: { value: float, [unit: 'C'] }
 - humidity: { value: float }
 - pressure: { value: float, [unit: 'hPa'] }
-- energy: {"power": int, "power_reactive": int, "power_apparent": int, "power_factor": float, "power_unit": "W", "energy_today": float, "energy_yesterday": float, "energy_total": float, "total_starttime": int, "total_duration": int, "energy_unit": "kWh", "voltage": int, "voltage_unit": "V", "current": float, "current_unit": "A"  }
-- netspeed: {"download": int, "download_unit": "bps", "upload": int, "upload_unit": "bps", "ping": float, "ping_unit": "ms", "error": string}
+- energy: {"power": int, "power_reactive": int, "power_apparent": int, "power_factor": float, "power:unit": "W", "energy_today": float, "energy_yesterday": float, "energy_total": float, "total_starttime": int, "total_duration": int, "energy:unit": "kWh", "voltage": int, "voltage:unit": "V", "current": float, "current:unit": "A"  }
+- netspeed: {"download": int, "download:unit": "bps", "upload": int, "upload:unit": "bps", "ping": float, "ping:unit": "ms", "error": string}
 - bandwidth: come sopra ma per la rete usata
 - water-leak: { value: [int] } # Inserito anche input con channel = "water-leak"
 
@@ -40,7 +40,7 @@ Events/actions:
 - presence-out: {"who": string, "after_someone_inside": bool, "region": "home" }
 //NO? Per ora non l'ho codificato presence-status: { areaname: who-list }
 
-- 'location': "js:({'latitude': payload['lat'], 'longitude': payload['lon'], 'altitude': payload['alt'], 'radius': payload['acc'], 'radius_unit': 'm', 'regions': payload['inregions'], 'source': 'owntracks'})",
+- 'location': "js:({'latitude': payload['lat'], 'longitude': payload['lon'], 'altitude': payload['alt'], 'radius': payload['acc'], 'radius:unit': 'm', 'regions': payload['inregions'], 'source': 'owntracks'})",
 
 TODO:
 - stats (@see sonoff_tasmota module)
