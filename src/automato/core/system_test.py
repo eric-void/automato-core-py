@@ -107,7 +107,7 @@ def test_init():
       },
       
       ####################################################################################
-      ### TEST event_get cache e event_params_keys
+      ### TEST event_get cache e event_keys
       
       {
         "item": "entry_c",
@@ -122,7 +122,7 @@ def test_init():
       {
         "item": "entry_d",
         "events_listen": [ ".data" ],
-        "event_params_keys": [ "myport" ],
+        "event_keys": [ "myport" ],
         "publish": {
           "./event": { "type": "object", "events": { "data": "js:(payload)" } }
         },
@@ -171,7 +171,7 @@ def test_run(entries):
     test.assertPublish('s10', 'entry_b/pub1', '1', assertEventsData = True, assertEvents = [{'name': 'test_event', 'params': {'port': '11'}, 'changed_params': {}, 'keys': {'port': '11'}, 'time': ('*',)}])
   
   ####################################################################################
-  ### TEST event_get cache e event_params_keys
+  ### TEST event_get cache e event_keys
   
   if (True):
     test.assertPublish('e1', 'item/entry_c/event', { 'port': '1', 'value': 5 }, assertEvents = {'data': { 'port': '1', 'value': 5 } })
@@ -219,7 +219,7 @@ def test_run(entries):
       (system.event_get("entry_c.data(js:params['port'] == '1')"), None),
       (system.event_get("entry_c.data(js:params['port'] == '2')"), { 'port': '2', 'value': 7 }),
     ])
-    # test event_params_keys definition (different cache for 'myport' param and NOT for 'port')
+    # test event_keys definition (different cache for 'myport' param and NOT for 'port')
     # also test for cumulative data of events and temporary
     test.assertPublish('e9', 'item/entry_d/event', { 'myport': '1', 'port': 5, 'cumulated': 9 }, assertEvents = {'data': { 'myport': '1', 'port': 5, 'cumulated': 9 } })
     test.assertx('e10', assertEq=[
