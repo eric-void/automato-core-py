@@ -1673,9 +1673,10 @@ def events_import(data, mode = 0):
   """
   for entry_id in data:
     for eventname in data[entry_id]:
-      for eventdata in data[entry_id][eventname]:
+      for keys_index in data[entry_id][eventname]:
+        eventdata = data[entry_id][eventname][keys_index]
         temporary = "temporary" in eventdata['params'] and eventdata['params']['temporary']
-        keys_index = entry_event_keys_index(eventdata['keys'] if 'keys' in eventdata else {}, temporary)
+        #keys_index = entry_event_keys_index(eventdata['keys'] if 'keys' in eventdata else {}, temporary)
         with events_published_lock:
           if not eventname in events_published:
             events_published[eventname] = {}
