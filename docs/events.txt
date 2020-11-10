@@ -49,28 +49,6 @@ TODO:
 
 
 
-config {
-  entries: [
-    entry {
-      "events:defaults" { # indica che sono i valori di default per l'evento (di questo entry): se non ne specifica altri prende questi
-        "event:output:metadata": { } # Non inizia per "js:" quindi non è un js... ma potrebbe esserlo
-        "action:output-set:metadata": {} # Una action ha comunque un evento per definire i propri metadata
-      }
-  }
-  "events:default": { # definisco qui i default generali
-  }
-}
-(Ma un modulo dovrebbe poter aggiungere dei default generali... quindi in pratica poter manipolare il config base ... e quindi un modulo "core" aggiungerà tutte le definizioni base di eventi|action
-
-
-"output:metadata": { value: { type: "int", values: [0, 1] } }
-"clock:metadata": { value: { type: "timestamp" } }
-
-
-
-
-
-
 *:unit:
 - power: W, kW, 
 - energy: Wh, kWh, Wmin
