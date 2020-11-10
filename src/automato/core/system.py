@@ -442,13 +442,6 @@ def _entry_definition_normalize(entry, phase):
       if 'publish' in entry.definition['subscribe'][t] and 'response' not in entry.definition['subscribe'][t]:
         entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish']
 
-    # events_passthrough translates in event_propagation via on/events definition
-    if 'events_passthrough' in entry.definition:
-      if isinstance(entry.definition['events_passthrough'], str):
-        entry.definition['events_passthrough'] = [ entry.definition['events_passthrough'] ]
-      for eventref in entry.definition['events_passthrough']:
-        on_event(eventref, _on_events_passthrough_listener_lambda(entry), entry, 'events_passthrough')
-  
   elif phase == 'init':
     for k in ['qos', 'retain']:
       if k in entry.definition:
@@ -488,11 +481,18 @@ def _entry_definition_normalize(entry, phase):
 
     notifications.entry_normalize(entry)
 
-def _on_events_passthrough_listener_lambda(source_entry):
-  return lambda entry, eventname, eventdata: _on_events_passthrough_listener(source_entry, entry, eventname, eventdata)
+def _on_events_passthrough_listener_lambda(dest_entry, passthrough_conf):
+  return lambda entry, eventname, eventdata: _on_events_passthrough_listener(entry, eventname, eventdata, dest_entry, passthrough_conf)
   
-def _on_events_passthrough_listener(source_entry, entry, eventname, eventdata):
-  _entry_event_publish_and_invoke_listeners(source_entry, eventname, eventdata['params'], eventdata['time'], '#events_passthrough')
+def _on_events_passthrough_listener(source_entry, eventname, eventdata, dest_entry, passthrough_conf):
+  params = copy.deepcopy(eventdata['params'])
+  if passthrough_conf['remove_keys'] and ('keys' in eventdata):
+    for k in eventdata['keys']:
+      del params[k]
+  if 'init' in passthrough_conf:
+    context = scripting_js.script_context({ 'params': params })
+    scripting_js.script_exec(passthrough_conf['init'], context)
+  _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, params, eventdata['time'], '#events_passthrough')
 
 """
 Extract the exportable portion [L.0]+[L.0N] of the full entry definition
@@ -1155,7 +1155,7 @@ def _entry_event_publish(entry, eventname, params, time):
   """
   Given an event generated (by a published messaged, or by an event passthrough), process it's params to generate event data and store it's content in events_published history var
   Note: if an event has no "event_keys", it's data will be setted to all other stored data (of events with keys_index). If a new keys_index occours, the data will be merged with "no params-key" data.
-  @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization
+  @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization, -X if from a stored event data (X is the original time)
   """
   global events_published, events_published_lock
   #logging.debug("SYSTEM> Published event " + entry.id + "." + eventname + " = " + str(params))
@@ -1185,6 +1185,11 @@ def _entry_event_publish(entry, eventname, params, time):
 
 def __entry_event_publish_store(entry, eventname, keys_index, data, time, event_keys):
   global events_published, events_published_lock
+  
+  if eventname not in entry.events:
+    entry.events[eventname] = ['?']
+    logging.warn("Generated an event not declared by the entry, added now to the declaration. Entry: {entry}, event: {eventname}".format(entry = entry.id, eventname = eventname))
+  
   with events_published_lock:
     # Extract changed params (from previous event detected)
     if eventname in events_published and entry.id in events_published[eventname] and keys_index in events_published[eventname][entry.id]:
@@ -1465,6 +1470,24 @@ def _entry_events_install(entry):
           for eventparams in data:
             _entry_event_publish(entry, eventname[0:-5], eventparams, -1)
 
+  # events_passthrough translates in event_propagation via on/events definition
+  if 'events_passthrough' in entry.definition:
+    if isinstance(entry.definition['events_passthrough'], str):
+      entry.definition['events_passthrough'] = [ entry.definition['events_passthrough'] ]
+    for ep in entry.definition['events_passthrough']:
+      if isinstance(ep, str):
+        ep = { "on": ep }
+      if "remove_keys" not in ep:
+        ep["remove_keys"] = True
+      on_event(ep["on"], _on_events_passthrough_listener_lambda(entry, ep), entry, 'events_passthrough')
+      eventname = ep["rename"] if "rename" in ep else None
+      if not eventname:
+        ref = decode_event_reference(ep["on"])
+        eventname = ref['event']
+      if eventname and eventname not in entry.events:
+        entry.events[eventname] = ['#passthrough']
+      
+
 def _entry_actions_load(entry):
   entry.do = entry_do_action_lambda(entry)
 
@@ -1483,6 +1506,7 @@ def _entry_actions_install(entry):
         elif actionname.endswith(':init'):
           data = entry.definition['subscribe'][topic]['actions'][actionname] if isinstance(entry.definition['subscribe'][topic]['actions'][actionname], list) else [ entry.definition['subscribe'][topic]['actions'][actionname] ]
           for eventparams in data:
+            entry.events['action/' + actionname[0:-5]] = [ '#action' ]
             _entry_event_publish(entry, 'action/' + actionname[0:-5], eventparams, -1)
 
 def entry_support_event(entry, eventname):
@@ -1662,14 +1686,19 @@ def entry_events_published(entry_or_id):
           res[eventname][keys_index] = events_published[eventname][entry.id][keys_index]
   return res;
 
-def events_import(data, mode = 0):
+def events_import(data, import_mode = 0, invoke_mode = 2):
   global events_published, events_published_lock
   
   """
-  @param mode = 0 only import events not present, or with time = -1|0
-  @param mode = 1 ... also events with time >= than the one in memory
-  @param mode = 2 ... also all events with time > 0
-  @param mode = 3 import all events (even if time = 0)
+  @param import_mode = -1 only import events not present, or with time = -1, and set the time as -time [used to import stored events]
+  @param import_mode = 0 only import events not present, or with time = -1|0
+  @param import_mode = 1 ... also events with time >= than the one in memory
+  @param import_mode = 2 ... also all events with time > 0
+  @param import_mode = 3 import all events (even if time = -1|0)
+  @param invoke_mode = 0 never invoke listeners of imported events
+  @param invoke_mode = 1 invoke listeners of imported events with time >= 0 (recent events)
+  @param invoke_mode = 2 invoke listeners of imported events with time != -1 (recent events & stored events, NOT for :init events)
+  @param invoke_mode = 3 invoke listeners of ALL imported events
   """
   for entry_id in data:
     for eventname in data[entry_id]:
@@ -1683,14 +1712,18 @@ def events_import(data, mode = 0):
           if not entry_id in events_published[eventname]:
             events_published[eventname][entry_id] = {}
           prevdata = events_published[eventname][entry_id][keys_index] if keys_index in this.events_published[eventname][entry_id] else None
-          go = mode == 3 or (not prevdata) or (prevdata['time'] <= 0 and eventdata['time'] > 0)
-          if (not go) and mode == 1:
+          go = import_mode == 3 or (not prevdata) or (prevdata['time'] == -1 and eventdata['time'] > 0)
+          if (not go) and import_mode == 0:
+            go = prevdata['time'] <= 0 and eventdata['time'] > 0
+          if (not go) and import_mode == 1:
             go = eventdata['time'] >= prevdata['time']
-          if (not go) and mode == 2:
+          if (not go) and import_mode == 2:
             go = eventdata['time'] > 0
           if go:
-            events_published[eventname][entry.id][keys_index] = eventdata
-            if eventdata['time'] >= 0 and not temporary:
+            if import_mode == -1 and eventdata['time'] > 0:
+              eventdata['time'] = - eventdata['time']
+            events_published[eventname][entry_id][keys_index] = eventdata
+            if (not temporary) and invoke_mode > 0 and (invoke_mode == 3 or (invoke_mode == 2 or eventdata['time'] != -1) or (invoke_mode == 1 and eventdata['time'] >= 0)):
               _entry_event_invoke_listeners(entry_get(entry_id), eventdata, 'import');
 
 def events_export():
