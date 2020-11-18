@@ -1366,7 +1366,7 @@ def subscribe_response(entry, message, callback = False, no_response_callback = 
           if "{" in rtopic_rule:
             for i in range(0, len(r['matches'])):
               rtopic_rule = rtopic_rule.replace("{matches[" + str(i) + "]}", str(r['matches'][i]))
-          s['listeners'].append({ 'topic_rule': rtopic_rule, 'expiry': timems() + (utils.read_duration(t['duration']) if 'duration' in t else default_duration) * 1000, 'count': t['count'] if 'count' in t else default_count })
+          s['listeners'].append({ 'topic_rule': rtopic_rule, 'expiry': timems() + (utils.read_duration(t['duration']) if 'duration' in t else default_duration) * 1000, 'count': 0, 'max_count': t['count'] if 'count' in t else default_count })
   
   if not s['listeners']:
     return False
@@ -1391,18 +1391,18 @@ def _subscribed_response_on_message(message):
   
   for x in subscribed_response:
     for l in x['listeners']:
-      if l['expiry'] + delay > now and l['count'] > 0:
+      if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count']):
         #TODO Gestire una cache di qualche tipo (qui ho bisogno solo di sapere che c'è il match, quindi basterebbe una cache di topic_matches)
         matches = topic_matches(l['topic_rule'], message.topic, message.payload)
         if matches['matched']:
-          l['count'] = l['count'] - 1
-          final = True if [m['count'] for m in x['listeners'] if m['count'] > 0] else False
+          l['count'] = l['count'] + 1
+          final = False if [m['count'] for m in x['listeners'] if m['count'] == 0 and m['max_count'] > 0] else True
           if x['callback']:
             x['callback'](x['entry'], x['id'], message, final, x['message'])
           x['called'] = True
   for x in subscribed_response:
     if [l for l in x['listeners'] if l['expiry'] + delay <= now or l['count'] <= 0]:
-      x['listeners'] = [l for l in x['listeners'] if l['expiry'] + delay > now and l['count'] > 0]
+      x['listeners'] = [l for l in x['listeners'] if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count'])]
 
 def _subscription_timer_thread():
   """
