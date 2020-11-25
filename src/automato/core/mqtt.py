@@ -16,6 +16,7 @@ import copy
 import struct
 
 from automato.core import system
+from automato.core import utils
 
 settings = {}
 connected = 0
@@ -216,7 +217,7 @@ def _decodePayload(v):
     pass
   if type(v) == str and v != '' and ((v[0] == '[' and v[-1] == ']') or (v[0] == '{' and v[-1] == '}')):
     try:
-      return json.loads(v)
+      return utils.json_import(v)
     except:
       logging.exception('error decoding payload')
       return None
@@ -266,7 +267,7 @@ def disconnect():
 def publish(topic, payload, qos = 0, retain = False):
   global connected, client, settings, disconnect_queue
   if not isinstance(payload, str) and payload != None:
-    payload = json.dumps(payload)
+    payload = utils.json_export(payload)
   if (connected == 0):
     if settings['publish_before_connection_policy'] == 'connect':
       logging.debug("connecting broker and publishing {topic} (qos = {qos}, retain = {retain})".format(topic = topic, qos = qos, retain = retain))

@@ -1225,7 +1225,7 @@ def event_get_invalidate_on_action(entry, action, full_params, if_event_not_matc
         condition = if_event_not_match_decoded['condition']
       else:
         event_keys = entry_event_keys(entry, eventname)
-        condition = " && ".join([ "params['" + k + "'] == " + json.dumps(full_params[k]) for k in event_keys if full_params and k in full_params])
+        condition = " && ".join([ "params['" + k + "'] == " + utils.json_export(full_params[k]) for k in event_keys if full_params and k in full_params])
 
       to_delete = []
       for keys_index in events_published[eventname][entry.id]:
@@ -1640,7 +1640,7 @@ def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeo
             match = e;
   if match:
     ret = (match['params'], ) if keys is None else tuple(match['time'] if k == '_time' else (match['params'][k] if k in match['params'] else None) for k in keys)
-    return ret[0] if len(ret) <= 1 else ret
+    return utils.nan_remove(ret[0] if len(ret) <= 1 else ret)
 
   return None if keys is None or len(keys) == 1 else tuple(None for k in keys)
 
@@ -1736,7 +1736,7 @@ def generate_event_reference(entry_id, eventname, eventdata):
   condition = ''
   if 'keys' in eventdata and eventdata['keys']:
     for k in eventdata['keys']:
-      condition = condition + (' && ' if condition else '') + 'params["' + k + '"] == ' + json.dumps(eventdata['keys'][k])
+      condition = condition + (' && ' if condition else '') + 'params["' + k + '"] == ' + utils.json_export(eventdata['keys'][k])
     condition = '(js: ' + condition + ')'
   return entry_id + '.' + eventname + condition
 

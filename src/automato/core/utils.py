@@ -112,15 +112,61 @@ def parse_datetime(v, milliseconds_float = False):
       return 0
   return int(ret) if not milliseconds_float else ret
 
+def json_export(v):
+  """
+  JSON-compliant json dumps: no "NaN" is generated (if NaN is in input, we'll try to convert it to None/null)
+  No exception is thrown: if v is invalid, an error will be logged and None is returned
+  """
+  try:
+    return json.dumps(v, allow_nan = False)
+  except ValueError as e:
+    if str(e) == 'Out of range float values are not JSON compliant':
+      logging.exception("utils.json_export> trying to export a value with NaN values, i'll try to convert them to null... (value: " + str(v) + ")")
+      v = nan_remove(v)
+      try:
+        return json.dumps(v, allow_nan = False)
+      except ValueError as e:
+        logging.exception(e)
+    else:
+      logging.exception(e)
+  return None
+
+def json_import(v):
+  """
+  JSON-compliant json load: no "NaN" (or other constant) is accepted (if NaN is in input, we'll try to convert it to None/null)
+  No exception is thrown: if v is invalid, an error will be logged and None is returned
+  """
+  try:
+    return json.loads(v, parse_constant = lambda x: None)
+  except:
+    logging.exception()
+    return None
+  
+def nan_remove(v):
+  if isinstance(v, list):
+    return list(map(nan_remove, v))
+  elif isinstance(v, dict):
+    for k in v:
+      v[k] = nan_remove(v[k])
+  elif is_nan(v):
+    v = None
+  return v
+
+def is_nan(v):
+  try:
+    return math.isnan(v)
+  except:
+    return False
+
 def json_sorted_encode(data):
-  return json.dumps(data if not isinstance(data, dict) else {x:data[x] for x in sorted(data)})
+  return json_export(data if not isinstance(data, dict) else {x:data[x] for x in sorted(data)})
 
 def b64_compress_data(data):
   """
   Compress and base-64 encode data
   """
   try:
-    return base64.b64encode(zlib.compress(json.dumps(data).encode('UTF-8'))).decode('UTF-8')
+    return base64.b64encode(zlib.compress(json_export(data).encode('UTF-8'))).decode('UTF-8')
   except:
     logging.exception("utils.b64_compress_data> Error compressing: " + str(data))
     return ""
@@ -130,7 +176,7 @@ def b64_decompress_data(string):
   Base 64 decode and decompress data
   """
   try:
-    return json.loads(zlib.decompress(base64.b64decode(string.encode('UTF-8'))).decode('UTF-8')) if isinstance(string, str) else string
+    return json_import(zlib.decompress(base64.b64decode(string.encode('UTF-8'))).decode('UTF-8')) if isinstance(string, str) else string
   except:
     logging.exception("utils.b64_decompress_data> Error decompressing: " + str(string))
     return None
