@@ -1724,7 +1724,9 @@ def events_import(data, import_mode = 0, invoke_mode = 2):
               eventdata['time'] = - eventdata['time']
             events_published[eventname][entry_id][keys_index] = eventdata
             if (not temporary) and invoke_mode > 0 and (invoke_mode == 3 or (invoke_mode == 2 or eventdata['time'] != -1) or (invoke_mode == 1 and eventdata['time'] >= 0)):
-              _entry_event_invoke_listeners(entry_get(entry_id), eventdata, 'import');
+              _e = entry_get(entry_id)
+              if _e:
+                _entry_event_invoke_listeners(_e, eventdata, 'import')
 
 def events_export():
   global all_entries
