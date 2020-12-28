@@ -1,6 +1,6 @@
 Naming conventions:
 - if event has name "xxxxx", linked actions should be "xxxxx-set" and "xxxxx-get".
-- standard value parameter must be "value" (used in events and actions"
+- standard value parameter must be "value" (used in events and actions)
 Common parameters:
 - port: if a device control several sub-devices (for example, a sonoff dual controls 2 separate relays) they are detected as "ports"
 - channel: if a device has different method to call the same device or sub-device(port), it uses different channels. For example, for a button, you could have "single-press" and "longpress" as 2 different channels
@@ -19,7 +19,7 @@ Events/actions:
 - alive: { value: boolean(1|0) }: entry is connected and sending messages @see modules/health, if 0 entry is not connected or not sending any message for a long time @see modules/health
 - failure: { value: boolean, [reason: ""] }
 
-- output: { value: 'X', [timer_to: timestamp] } // NOTA: value in genere è un "int" (0,1), ma potrebbe anche essere una stringa per i multi-value (per ora solo ipotizzati)
+- output: { value: 'X', [intensity: X], [timer_to: timestamp] } // NOTA: value in genere è un "int" (0,1), ma potrebbe anche essere una stringa per i multi-value (per ora solo ipotizzati)
 - ACTION: output-set: { value: 'X', [timer_to: seconds|timestamp] } 
 - ACTION: output-get: {}
 - ACTION: output-invert: { [value: 'X'], [timer_to: seconds|timestamp] } // NOTA: value è inutile per i toggle (0,1), ma potrebbe invece essere utile per i multi-value (per invertire solo un certo valore)
@@ -46,6 +46,10 @@ TODO:
 - stats (@see sonoff_tasmota module)
 
 
+:def:
+- [0, 1] | ['one', 'two', ...]
+- 'int' (+ ':def:limits': [1, 100])
+- 'float'
 
 
 
