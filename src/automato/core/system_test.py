@@ -6,8 +6,10 @@ import time
 from automato.core import test
 from automato.core import system
 
+test_history = True
+
 def test_init():
-  test.add_node_config({
+  config = {
     "entries": [
       {
         "item": "entry_a",
@@ -144,9 +146,15 @@ def test_init():
         },
       },
     ]
-  })
+  }
+  if test_history:
+    config["entries"].append({ "module": "history" })
+  test.add_node_config(config)
 
 def test_run(entries):
+  if test_history:
+    entries['history@TEST'].module.run(entries['history@TEST'])
+
   if (True):
     # Test "events", "on" declarations and "payload_transform"
     test.assertPublish('s1', 'entry_b/pub1', 'test', assertChild = ['entry_a_on_test_event1'], assertNotChild = ['entry_a_on_test_event2', 'entry_a_on_test_event_implicit'], assertEvents = {'test_event': {'port': 'test1'}}, assertNotification = ['info', 'Entry B published pub1=test'])
@@ -170,6 +178,9 @@ def test_run(entries):
     test.assertPublish('s9', 'entry_b/pub1', '', assertEventsData = True, assertEvents = [{'name': 'test_event', 'params': {'port': '1'}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ('*',)}])
     test.assertPublish('s10', 'entry_b/pub1', '1', assertEventsData = True, assertEvents = [{'name': 'test_event', 'params': {'port': '11'}, 'changed_params': {}, 'keys': {'port': '11'}, 'time': ('*',)}])
   
+    if test_history:
+      entries['history@TEST'].module.run(entries['history@TEST'])
+
   ####################################################################################
   ### TEST event_get cache e event_keys
   
@@ -244,6 +255,9 @@ def test_run(entries):
       (system.event_get("entry_d.data(js:params['myport'] == '1')", temporary = True), { 'myport': '1', 'port': 7, 'cumulated': 9, 'temporary': True }),
       (system.event_get("entry_d.data(js:params['myport'] == '2')"), { 'myport': '2', 'port': 6 }),
     ])
+    if test_history:
+      entries['history@TEST'].module.run(entries['history@TEST'])
+    
   
   ####################################################################################
   ### TEST multiple events / event:init
@@ -267,6 +281,9 @@ def test_run(entries):
         {'name': 'data', 'params': {'all': 2, 'z': 3}, 'changed_params': {'all': 2}, 'keys': {}, 'time': ()},
         {'name': 'data', 'params': {'port': '1', 'value': 1, 'unit': 'A', 'all': 2, 'z': 3}, 'changed_params': {}, 'keys': {'port': '1'}, 'time': ()}
       ])
+    if test_history:
+      entries['history@TEST'].module.run(entries['history@TEST'])
+      
     
   ####################################################################################
   ### TEST topic_matches
@@ -289,6 +306,8 @@ def test_run(entries):
       (system.topic_matches('/^a(.*)$/[js: matches[1]=="/b/c" && payload=="x"]', 'a/b/c', ''), { 'matched': False, 'topic_matches': ['a/b/c', '/b/c'], 'use_payload': True, 'used': ('*',) }),
       (system.topic_matches('/^a(.*)$/[js: matches[1]=="/b/c" && payload=="x"]', 'a/b/c', 'x'), { 'matched': True, 'topic_matches': ['a/b/c', '/b/c'], 'use_payload': True, 'used': ('*',) }),
     ])
+    if test_history:
+      entries['history@TEST'].module.run(entries['history@TEST'])
   
   # TODO Test invokeHandlers
   
