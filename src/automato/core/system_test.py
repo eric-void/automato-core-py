@@ -6,7 +6,7 @@ import time
 from automato.core import test
 from automato.core import system
 
-test_history = True
+test_history = False
 
 def test_init():
   config = {
