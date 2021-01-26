@@ -71,8 +71,9 @@ def set_config(_config):
   config = _config
 
 def boot():
-  global config
+  global config, destroyed
   
+  destroyed = False
   system_extra.init_locale(config)
   system_extra.init_logging(config)
   _reset()
@@ -94,10 +95,25 @@ def boot():
     mqtt.config(config['mqtt'])
 
 def _reset():
-  global handler_on_entry_load, handler_on_entry_install, handler_on_loaded, handler_on_initialized, handler_on_message, handler_on_all_events
+  global all_entries, all_entries_signatures, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, index_topic_published, index_topic_subscribed
+  all_entries = {}
+  all_entries_signatures = {}
+  all_nodes = {}
+  exports = {}
+  subscriptions = {}
+  last_entry_and_events_for_received_mqtt_message = None
+  events_listeners = {}
+  events_published = {}
+  events_published_lock = threading.Lock()
+  index_topic_published = {}
+  index_topic_subscribed = {}
+  scripting_js.exports = exports
+  
+  global handler_on_entry_load, handler_on_entry_unload, handler_on_entry_init, handler_on_entries_change, handler_on_initialized, handler_on_message, handler_on_all_events
   handler_on_entry_load = []
-  handler_on_entry_install = []
-  handler_on_loaded = []
+  handler_on_entry_unload = []
+  handler_on_entry_init = []
+  handler_on_entries_change = []
   handler_on_initialized = []
   handler_on_message = []
   handler_on_all_events = []
@@ -106,13 +122,20 @@ def on_entry_load(handler):
   global handler_on_entry_load
   handler_on_entry_load.append(handler)
 
-def on_entry_install(handler):
-  global handler_on_entry_install
-  handler_on_entry_install.append(handler)
+def on_entry_unload(handler):
+  global handler_on_entry_unload
+  handler_on_entry_unload.append(handler)
 
-def on_loaded(handler):
-  global handler_on_loaded
-  handler_on_loaded.append(handler)
+def on_entry_init(handler):
+  global handler_on_entry_init
+  handler_on_entry_init.append(handler)
+
+"""
+@param handler (entry_ids_loaded, entry_ids_unloaded)
+"""
+def on_entries_change(handler):
+  global handler_on_entries_change
+  handler_on_entries_change.append(handler)
 
 def on_initialized(handler):
   global handler_on_initialized
@@ -131,22 +154,9 @@ def _mqtt_connect_callback(callback, phase):
     callback()
 
 def init(callback):
-  global destroyed, config, all_entries, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, index_topic_published, index_topic_subscribed, default_node_name, subscribed_response, subscription_thread
-  destroyed = False
-  all_entries = {}
-  all_nodes = {}
-  exports = {}
-  subscriptions = {}
-  last_entry_and_events_for_received_mqtt_message = None
-  events_listeners = {}
-  events_published = {}
-  events_published_lock = threading.Lock()
-  index_topic_published = {}
-  index_topic_subscribed = {}
+  global config, all_entries, default_node_name, subscribed_response, subscription_thread
   topic_cache_reset()
   default_node_name = config['name'] if 'name' in config else 'root'
-  
-  scripting_js.exports = exports
   
   subscribed_response = []
   subscription_thread = threading.Thread(target = _subscription_timer_thread, daemon = True) # daemon = True allows the main application to exit even though the thread is running. It will also (therefore) make it possible to use ctrl+c to terminate the application
@@ -154,7 +164,7 @@ def init(callback):
   
   notifications.init()
   
-  entry_load_definitions(config['entries'], node_name = default_node_name, initial = True, id_from_definition = True)
+  entry_load_definitions(config['entries'], node_name = default_node_name, initial = True, id_from_definition = True, generate_new_entry_id_on_conflict = True)
 
   if handler_on_initialized:
     for h in handler_on_initialized:
@@ -163,7 +173,10 @@ def init(callback):
   mqtt.connect(lambda phase: _mqtt_connect_callback(callback, phase))
   
 def destroy():
-  global destroyed, subscription_thread
+  global all_entries, destroyed, subscription_thread
+  while len(all_entries.keys()):
+    entry_unload(list(all_entries.keys())[0])
+  
   destroyed = True
   notifications.destroy()
   subscription_thread.join()
@@ -296,69 +309,120 @@ class Entry(object):
       definition['type'] = 'module' if 'module' in definition else ('device' if 'device' in definition else 'item')
     self.type = definition['type']
     self.definition = definition
-    self.caption = self.definition['caption'] if 'caption' in self.definition else self.id_local
+    self.definition_loaded = copy.deepcopy(definition)
     self.created = time()
     self.last_seen = 0
     self.exports = exports
     self.topic_rule_aliases = {}
     self.topic = entry_topic_lambda(self)
     self.publish = entry_publish_lambda(self)
+    self._refresh_definition_based_properties()
+  
+  # Call this when entry.definition changes (should happen only during entry_load phase)
+  def _refresh_definition_based_properties(self):
+    self.config = self.definition['config'] if 'config' in self.definition else {}
+    self.caption = self.definition['caption'] if 'caption' in self.definition else self.id_local
 
-def entry_load(definition, node_name = False, entry_id = False, replace_if_exists = True):
-  global config, default_node_name, all_entries, all_nodes, handler_on_entry_load
-  if not node_name:
-    node_name = default_node_name
+def entry_load(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False, call_on_entries_change = True):
+  global config, default_node_name, all_entries, all_entries_signatures, all_nodes, handler_on_entry_load, handler_on_entry_init, handler_on_entries_change
+  if not isinstance(definition, dict):
+    return None
+
+  if not from_node_name:
+    d = entry_id.find("@") if entry_id else -1
+    from_node_name = entry_id[d + 1:] if d >= 0 else default_node_name
   
   if not entry_id:
-    definition_id = definition['id'] if 'id' in definition else (definition['module'] if 'module' in definition else (definition['device'] if 'device' in definition else (definition['item'] if 'item' in definition else '')))
-    d = definition_id.find("@")
-    if d < 0:
-      entry_id = re.sub('[^A-Za-z0-9_-]+', '-', definition_id)
-      i = 0
-      while entry_id + '@' + node_name in all_entries:
-        entry_id = re.sub('[^A-Za-z0-9_-]+', '-', definition_id + '_' + str(++ i))
-      entry_id = entry_id + '@' + node_name
-    else:
-      entry_id = definition_id
+    entry_id = definition['id'] if 'id' in definition else (definition['module'] if 'module' in definition else (definition['device'] if 'device' in definition else (definition['item'] if 'item' in definition else '')))
+  if not entry_id:
+    return None
+  entry_id = re.sub('[^A-Za-z0-9@_-]+', '-', entry_id)
+  d = entry_id.find("@")
+  if d < 0:
+    entry_id = entry_id + '@' + from_node_name
+    
+  if generate_new_entry_id_on_conflict and entry_id in all_entries:
+    d = entry_id.find("@")
+    entry_local_id = entry_id[:d]
+    entry_node_name = entry_id[d + 1:]
+    entry_id = entry_local_id
+    i = 0
+    while entry_id + '@' + entry_node_name in all_entries:
+      i += 1
+      entry_id = entry_local_id + '_' + str(i)
+    entry_id = entry_id + '@' + entry_node_name
+
+  new_signature = utils.data_signature(definition)
   if entry_id in all_entries:
-    if not replace_if_exists:
-      logging.error("SYSTEM> Entry id already exists: {entry_id}, entry not loaded".format(entry_id = entry_id))
+    if new_signature and all_entries_signatures[entry_id] == new_signature:
       return None
-    else:
-      logging.debug("SYSTEM> Entry id already exists: {entry_id}, entry not loaded".format(entry_id = entry_id))
-      entry_unload(entry_id)
+    entry_unload(entry_id)
   
   entry = Entry(entry_id, definition, config)
+  entry.is_local = entry.node_name == default_node_name
   
+  _entry_events_load(entry)
+  _entry_actions_load(entry)
+
   if handler_on_entry_load:
     for h in handler_on_entry_load:
       h(entry)
-  
-  if not isinstance(entry.definition, dict):
-    entry.definition = {}
-  entry.config = entry.definition['config'] if 'config' in entry.definition else {}
-  
-  _entry_definition_normalize(entry, 'load')
-  _entry_events_load(entry)
-  _entry_actions_load(entry)
+
+  entry._refresh_definition_based_properties()
+
+  _entry_definition_normalize_after_load(entry)
+  _entry_events_install(entry)
+  _entry_actions_install(entry)
+  _entry_add_to_index(entry)
   
   all_entries[entry_id] = entry
+  all_entries_signatures[entry_id] = new_signature
   if entry.node_name not in all_nodes:
     all_nodes[entry.node_name] = {}
 
+  if handler_on_entry_init:
+    for h in handler_on_entry_init:
+      h(entry)
+      
+  if call_on_entries_change and handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h([entry.id], [])
+
   return entry
 
-def entry_unload(entry_id):
-  global all_entries
+def entry_unload(entry_id, call_on_entries_change = True):
+  global all_entries, all_entries_signatures, handler_on_entries_change
   if entry_id in all_entries:
-    _entry_remove_from_index(all_entries[entry_id])
-    del all_entries[entry_id]
+    if handler_on_entry_unload:
+      for h in handler_on_entry_unload:
+        h(all_entries[entry_id])
 
-def entry_load_definitions(definitions, node_name = False, initial = False, unload_other_from_node = False, id_from_definition = False):
+    remove_event_listener_by_reference_entry(entry_id)
+    _entry_remove_from_index(all_entries[entry_id])
+    
+    del all_entries[entry_id]
+    del all_entries_signatures[entry_id]
+    
+    if call_on_entries_change and handler_on_entries_change:
+      for h in handler_on_entries_change:
+        h([], [entry_id])
+
+def entry_reload(entry_id, call_on_entries_change = True):
+  global all_entries, handler_on_entries_change
+  if entry_id in all_entries:
+    definition = all_entries[entry_id].definition_loaded
+    entry_unload(entry_id, call_on_entries_change = False)
+    entry_load(definition, None, entry_id, generate_new_entry_id_on_conflict = False, call_on_entries_change = False)
+
+    if call_on_entries_change and handler_on_entries_change:
+      for h in handler_on_entries_change:
+        h([entry_id], [entry_id])
+
+def entry_load_definitions(definitions, node_name = False, initial = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
   """
   @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
   """
-  global all_entries, default_node_name, handler_on_loaded, handler_on_entry_install
+  global all_entries, default_node_name, handler_on_entries_change
   
   if not node_name:
     node_name = default_node_name
@@ -371,46 +435,42 @@ def entry_load_definitions(definitions, node_name = False, initial = False, unlo
     else:
       entry_id = False
     if 'disabled' not in definition or not definition['disabled']:
-      entry = entry_load(definition, node_name = node_name, entry_id = entry_id)
+      entry = entry_load(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict, call_on_entries_change = False)
       if entry:
         loaded[entry.id] = entry
 
-  if handler_on_loaded:
-    for h in handler_on_loaded:
-      h(loaded, initial = initial)
-
-  for entry_id, entry in loaded.items():
-    _entry_definition_normalize(entry, 'loaded')
-    _entry_definition_normalize(entry, 'init')
-    _entry_events_install(entry)
-    _entry_actions_install(entry)
-    
-    _entry_add_to_index(entry)
-    
-    if handler_on_entry_install:
-      for h in handler_on_entry_install:
-        h(entry)
-
+  todo_unload = []
   if unload_other_from_node:
-    todo_unload = []
     for entry_id in all_entries:
       if all_entries[entry_id].node_name == node_name and entry_id not in loaded:
         todo_unload.append(entry_id)
     for entry_id in todo_unload:
-      entry_unload(entry_id)
+      entry_unload(entry_id, call_on_entries_change = False)
+      
+  if handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h(list(loaded.keys()), todo_unload)
 
 def entry_unload_node_entries(node_name):
-  global all_entries
+  global all_entries, handler_on_entries_change
   todo_unload = []
   for entry_id in all_entries:
     if all_entries[entry_id].node_name == node_name:
       todo_unload.append(entry_id)
-  for entry_id in todo_unload:
-    entry_unload(entry_id)
+  if todo_unload:
+    for entry_id in todo_unload:
+      entry_unload(entry_id, call_on_entries_change = False)
+      
+  if handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h([], todo_unload)
 
 def entries():
   global all_entries
   return all_entries
+
+
+
 
 
 
@@ -421,70 +481,68 @@ def entries():
 #
 ###############################################################################################################################################################
 
-def _entry_definition_normalize(entry, phase):
-  if phase == 'load':
-    if not 'publish' in entry.definition:
-      entry.definition['publish'] = {}
-    if not 'subscribe' in entry.definition:
-      entry.definition['subscribe'] = {}
-    if entry.is_local:
-      if not 'entry_topic' in entry.definition:
-        entry.definition['entry_topic'] = entry.type + '/' + entry.id_local
-      if not 'topic_root' in entry.definition:
-        entry.definition['topic_root'] = entry.definition['entry_topic']
-    if not 'on' in entry.definition:
-      entry.definition['on'] = {}
-    if not 'events_listen' in entry.definition:
-      entry.definition['events_listen'] = {}
+def _entry_definition_normalize_after_load(entry):
+  if not 'publish' in entry.definition:
+    entry.definition['publish'] = {}
+  if not 'subscribe' in entry.definition:
+    entry.definition['subscribe'] = {}
+  if not 'on' in entry.definition:
+    entry.definition['on'] = {}
+  if not 'events_listen' in entry.definition:
+    entry.definition['events_listen'] = {}
+    
+  if entry.is_local:
+    if not 'entry_topic' in entry.definition:
+      entry.definition['entry_topic'] = entry.type + '/' + entry.id_local
+    if not 'topic_root' in entry.definition:
+      entry.definition['topic_root'] = entry.definition['entry_topic']
 
-  elif phase == 'loaded':
-    for t in entry.definition['subscribe']:
-      if 'publish' in entry.definition['subscribe'][t] and 'response' not in entry.definition['subscribe'][t]:
-        entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish']
+  for t in entry.definition['subscribe']:
+    if 'publish' in entry.definition['subscribe'][t] and 'response' not in entry.definition['subscribe'][t]:
+      entry.definition['subscribe'][t]['response'] = entry.definition['subscribe'][t]['publish']
 
-  elif phase == 'init':
-    for k in ['qos', 'retain']:
-      if k in entry.definition:
-        for topic_rule in entry.definition['publish']:
-          if k not in entry.definition['publish'][topic_rule]:
-            entry.definition['publish'][topic_rule][k] = entry.definition[k]
-
-    if 'publish' in entry.definition:
-      res = {}
+  for k in ['qos', 'retain']:
+    if k in entry.definition:
       for topic_rule in entry.definition['publish']:
-        if 'topic' in entry.definition['publish'][topic_rule]:
-          entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic'])
-        res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule]
-      entry.definition['publish'] = res
+        if k not in entry.definition['publish'][topic_rule]:
+          entry.definition['publish'][topic_rule][k] = entry.definition[k]
 
-    if 'subscribe' in entry.definition:
-      res = {}
-      for topic_rule in entry.definition['subscribe']:
-        if 'topic' in entry.definition['subscribe'][topic_rule]:
-          entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['subscribe'][topic_rule]['topic'])
-        res[entry.topic(topic_rule)] = entry.definition['subscribe'][topic_rule]
-      entry.definition['subscribe'] = res
+  if 'publish' in entry.definition:
+    res = {}
+    for topic_rule in entry.definition['publish']:
+      if 'topic' in entry.definition['publish'][topic_rule]:
+        entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic'])
+      res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule]
+    entry.definition['publish'] = res
 
-      for topic_rule in entry.definition['subscribe']:
-        if 'response' in entry.definition['subscribe'][topic_rule]:
-          res = []
-          for t in entry.definition['subscribe'][topic_rule]['response']:
-            if not isinstance(t, dict):
-              t = { 'topic': t }
-            if 'topic' in t and t['topic'] != 'NOTIFY':
-              t['topic'] = entry.topic(t['topic'])
-            res.append(t)
-          entry.definition['subscribe'][topic_rule]['response'] = res
+  if 'subscribe' in entry.definition:
+    res = {}
+    for topic_rule in entry.definition['subscribe']:
+      if 'topic' in entry.definition['subscribe'][topic_rule]:
+        entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['subscribe'][topic_rule]['topic'])
+      res[entry.topic(topic_rule)] = entry.definition['subscribe'][topic_rule]
+    entry.definition['subscribe'] = res
+
+    for topic_rule in entry.definition['subscribe']:
+      if 'response' in entry.definition['subscribe'][topic_rule]:
+        res = []
+        for t in entry.definition['subscribe'][topic_rule]['response']:
+          if not isinstance(t, dict):
+            t = { 'topic': t }
+          if 'topic' in t and t['topic'] != 'NOTIFY':
+            t['topic'] = entry.topic(t['topic'])
+          res.append(t)
+        entry.definition['subscribe'][topic_rule]['response'] = res
           
-    for eventref in entry.definition['events_listen']:
-      add_event_listener(eventref, entry, 'events_listen')
+  for eventref in entry.definition['events_listen']:
+    add_event_listener(eventref, entry, 'events_listen')
 
-    notifications.entry_normalize(entry)
+  notifications.entry_normalize(entry)
 
 def _on_events_passthrough_listener_lambda(dest_entry, passthrough_conf):
-  return lambda entry, eventname, eventdata: _on_events_passthrough_listener(entry, eventname, eventdata, dest_entry, passthrough_conf)
+  return lambda entry, eventname, eventdata, caller, published_message: _on_events_passthrough_listener(entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf)
   
-def _on_events_passthrough_listener(source_entry, eventname, eventdata, dest_entry, passthrough_conf):
+def _on_events_passthrough_listener(source_entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf):
   params = copy.deepcopy(eventdata['params'])
   if passthrough_conf['remove_keys'] and ('keys' in eventdata):
     for k in eventdata['keys']:
@@ -492,7 +550,7 @@ def _on_events_passthrough_listener(source_entry, eventname, eventdata, dest_ent
   if 'init' in passthrough_conf:
     context = scripting_js.script_context({ 'params': params })
     scripting_js.script_exec(passthrough_conf['init'], context)
-  _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, params, eventdata['time'], '#events_passthrough')
+  _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, params, eventdata['time'], 'events_passthrough', published_message)
 
 """
 Extract the exportable portion [L.0]+[L.0N] of the full entry definition
@@ -597,7 +655,12 @@ def entry_id_match(entry, reference):
   Return if the id of the entry (reference) matches the one on the entry
   If the reference has no "@", only the local part is matched (so, if there are more entries with the same local part, every one of these is matched)
   """
-  #OBSOLETE: return (entry.id == reference) or (reference.find("@") < 0 and entry.is_local and entry.id_local == reference)
+  if isinstance(entry, str):
+    if entry == reference:
+      return True
+    d1 = entry.find("@")
+    d2 = reference.find("@")
+    return (d1 < 0 and d2 >= 0 and entry == reference[:d2]) or (d1 >= 0 and d2 < 0 and entry[:d1] == reference)
   return (entry.id == reference) or (reference.find("@") < 0 and entry.id_local == reference)
 
 def entry_id_find(entry_id):
@@ -947,8 +1010,18 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
 #
 ###############################################################################################################################################################
 
+message_counter = 0
+message_counter_lock = threading.Lock()
+
 class Message(object):
-  def __init__(self, topic, payload, qos = None, retain = None, payload_source = None, received = 0):
+  def __init__(self, topic, payload, qos = None, retain = None, payload_source = None, received = 0, copy_id = -1):
+    global message_counter, message_counter_lock
+    if copy_id == -1:
+      with message_counter_lock:
+        self.id = message_counter
+        message_counter += 1
+    else:
+      self.id = copy_id
     self.topic = topic
     self.payload = payload
     self.payload_source = payload_source
@@ -1016,7 +1089,7 @@ class Message(object):
     return self._events
   
   def copy(self):
-    m = Message(self.topic, copy.deepcopy(self.payload), self.qos, self.retain, self.payload_source, self.received)
+    m = Message(self.topic, copy.deepcopy(self.payload), self.qos, self.retain, self.payload_source, self.received, self.id)
     m._publishedMessages = self._publishedMessages
     m._firstPublishedMessage = self._firstPublishedMessage
     m._subscribedMessages = self._subscribedMessages
@@ -1253,12 +1326,13 @@ def _entry_event_invoke_listeners(entry, eventdata, caller, published_message = 
     for entry_ref in events_listeners[eventname]:
       if entry_ref == '*' or entry_id_match(entry, entry_ref):
         #logging.debug("_entry_event_invoke_listeners_match" + str(events_listeners[eventname][entry_ref]))
-        for listener, condition in events_listeners[eventname][entry_ref]:
-          _s = _stats_start()
-          if condition is None or _entry_event_params_match_condition(eventdata, condition):
-            #logging.debug("_entry_event_invoke_listeners_GO")
-            listener(entry, eventname, eventdata)
-          _stats_end('event_listener(' + str(listener) + '|' + str(condition) + ')', _s)
+        for listener, condition, reference_entry_id in events_listeners[eventname][entry_ref]:
+          if listener:
+            _s = _stats_start()
+            if condition is None or _entry_event_params_match_condition(eventdata, condition):
+              #logging.debug("_entry_event_invoke_listeners_GO")
+              listener(entry, eventname, eventdata, caller, published_message)
+            _stats_end('event_listener(' + str(listener) + '|' + str(condition) + ')', _s)
             
   if handler_on_all_events:
     for h in handler_on_all_events:
@@ -1270,10 +1344,10 @@ def _entry_event_params_match_condition(eventdata, condition):
   """
   return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, cache = True)
 
-def _entry_event_publish_and_invoke_listeners(entry, eventname, params, time, caller):
-  # @param caller is "#events_passthrough" in case of events_passthrough
+def _entry_event_publish_and_invoke_listeners(entry, eventname, params, time, caller, published_message):
+  # @param caller is "events_passthrough" in case of events_passthrough
   eventdata = _entry_event_publish(entry, eventname, params, time)
-  _entry_event_invoke_listeners(entry, eventdata, caller)
+  _entry_event_invoke_listeners(entry, eventdata, caller, published_message)
 
 
 
@@ -1527,11 +1601,13 @@ def on_event(eventref, listener = None, reference_entry = None, reference_tag = 
   """
   Adds an event listener based on the event reference string "entry.event(condition)"
   @param eventref 
-  @param listener a callback, defined as listener(entry, eventname, eventdata)
-  @param reference_entry The entry with the event_reference. Used for implicit references (if eventref dont contains entry id).
+  @param listener a callback, defined as listener(entry, eventname, eventdata, caller, published_message) - caller = "message|import|events_passthrough", published_message = source message (null for import)
+  @param reference_entry The entry generating this reference. If an entry is doing this call, you MUST pass this parameter. It's used to clean the enviroment when the caller in unloaded. Also used for implicit reference (if eventref dont contains entry id).
   @param reference_tag Just for logging purpose, the context of the entry defining the the event_reference (so who reads the log could locate where the event_reference is defined)
   """
   global events_listeners
+  if not reference_entry:
+    logging.warn("SYSTEM> Called system.on_event without a reference entry: {eventref}".format(eventref = eventref))
   d = decode_event_reference(eventref, default_entry_id = reference_entry.id if reference_entry else None) if not isinstance(eventref, dict) else eventref
   if not d:
     logging.error("#{entry}> Invalid '{type}' definition{tag}: {defn}".format(entry = reference_entry.id if reference_entry else '?', type = 'on event' if listener else 'events_listen', tag = (' in ' + reference_tag) if reference_tag else '', defn = eventref))
@@ -1541,8 +1617,7 @@ def on_event(eventref, listener = None, reference_entry = None, reference_tag = 
     #OBSOLETE: d['entry'] = entry_id_expand(d['entry'])
     if not d['entry'] in events_listeners[d['event']]:
       events_listeners[d['event']][d['entry']] = []
-    if listener:
-      events_listeners[d['event']][d['entry']].append([listener, d['condition']])
+    events_listeners[d['event']][d['entry']].append([listener, d['condition'], reference_entry.id if reference_entry else None])
 
 def add_event_listener(eventref, reference_entry = None, reference_tag = None):
   """
@@ -1551,16 +1626,40 @@ def add_event_listener(eventref, reference_entry = None, reference_tag = None):
   on_event(eventref, None, reference_entry, reference_tag)
 
 def entry_on_event_lambda(entry):
-  return lambda event, listener, condition = None: entry_on_event(entry, event, listener, condition)
+  return lambda event, listener, condition = None, reference_entry = None, reference_tag = None: entry_on_event(entry, event, listener, condition, reference_entry, reference_tag)
 
-def entry_on_event(entry, event, listener, condition = None):
+def entry_on_event(entry, event, listener, condition = None, reference_entry = None, reference_tag = None):
   """
   Adds an event listener on the specified entry.event(condition)
   @param event name of event matched
-  @param listener a callback, defined as listener(entry, eventname, eventdata)
+  @param listener a callback, defined as listener(entry, eventname, eventdata, caller, published_message)
   @param condition javascript condition to match event. Example: "port = 1 && value < 10"
+  @param reference_entry The entry generating this reference. If an entry is doing this call, you MUST pass this parameter. It's used to clean the enviroment when the caller in unloaded. Also used for implicit reference (if eventref dont contains entry id).
+  @param reference_tag Just for logging purpose, the context of the entry defining the the event_reference (so who reads the log could locate where the event_reference is defined)
   """
-  on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener)
+  on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener, reference_entry, reference_tag)
+
+"""
+Remove all event listener with target or reference equal to reference_entry_id
+"""
+def remove_event_listener_by_reference_entry(reference_entry_id):
+  global events_listeners
+  clean = False
+  for eventname in events_listeners:
+    clean2 = False
+    for entry_ref in events_listeners[eventname]:
+      if entry_id_match(entry_ref, reference_entry_id):
+        events_listeners[eventname][entry_ref] = []
+      else:
+        events_listeners[eventname][entry_ref] = [[listener, condition, ref] for listener, condition, ref in events_listeners[eventname][entry_ref] if ref != reference_entry_id]
+      if not events_listeners[eventname][entry_ref]:
+        clean2 = True
+    if clean2:
+      events_listeners[eventname] = {entry_ref: events_listeners[eventname][entry_ref] for entry_ref in events_listeners[eventname] if events_listeners[eventname][entry_ref]}
+    if not events_listeners[eventname]:
+      clean = True
+  if clean:
+    events_listeners = { eventname: events_listeners[eventname] for eventname in events_listeners if events_listeners[eventname]}
 
 def entry_support_action(entry, actionname):
   if hasattr(entry, 'actions'):

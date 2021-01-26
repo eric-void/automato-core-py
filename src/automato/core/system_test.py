@@ -167,6 +167,8 @@ def test_run(entries):
     entries['entry_a@TEST'].on('test_event', on_test_on_event2, 'js:params["port"] == "fake"')
     test.assertPublish('s5', 'item/entry_a/event', '', assertChild = ['entry_a_prog_on', 'entry_a_on_test_event_implicit'], assertNotChild = ['entry_a_on_test_event2'], assertEvents = {'test_event': {"port": "entry_a"}})
     
+    #system.entry_reload('entry_a@TEST');
+    
     # Test "actions" and "handler" declarations
     test.assertAction('s6', 'entry_b', 'test_action', { 'value': '1' }, init = 'js:params["val2"] = "0"', assertSubscribe = {'subs/entry_b': 'test10', 'subs/entry_b/response': 'ok'}, assertChild = ['entry_b_on_subscribed_message', 'entry_b_publish', 'entry_b_on_events_passthrough'], assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}})
     test.assertAction('s7', 'entry_b', 'test_action2', { 'value': '1' }, init = 'js:params["val2"] = params["val2"] + "X"', assertSubscribe = {'subs/entry_b/TEST0X': 'test10X', 'subs/entry_b/response': 'ok'}, assertChild = ['entry_b_on_subscribed_message2', 'entry_b_publish'], assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}})
@@ -311,22 +313,22 @@ def test_run(entries):
   
   # TODO Test invokeHandlers
   
-def on_test_on_event1(entry, eventname, eventdata):
+def on_test_on_event1(entry, eventname, eventdata, caller, published_message):
   if test.isRunning('s1'):
     test.assertChild('entry_a_on_test_event1', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "test1"})])
   elif test.isRunning('s2'):
     test.assertChild('entry_a_on_test_event1', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "1"})])
 
-def on_test_on_event2(entry, eventname, eventdata):
+def on_test_on_event2(entry, eventname, eventdata, caller, published_message):
   test.assertChild('entry_a_on_test_event2', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "1"})])
 
-def on_test_on_event3(entry, eventname, eventdata):
+def on_test_on_event3(entry, eventname, eventdata, caller, published_message):
   test.assertChild('entry_a_prog_on', assertEq = [(entry.id, "entry_a@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "entry_a"})])
 
-def on_test_on_event_implicit(entry, eventname, eventdata):
+def on_test_on_event_implicit(entry, eventname, eventdata, caller, published_message):
   test.assertChild('entry_a_on_test_event_implicit', assertEq = [(entry.id, "entry_a@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "entry_a"})])
   
-def on_test_on_events_passthrough(entry, eventname, eventdata):
+def on_test_on_events_passthrough(entry, eventname, eventdata, caller, published_message):
   test.assertChild('entry_b_on_events_passthrough', assertEq = [(entry.id, "entry_a@TEST"), (eventname, "test_action_response"), (eventdata['params'], {})])
 
 def on_subscribed_message(entry, subscribed_message):

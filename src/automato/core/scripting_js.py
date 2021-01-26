@@ -5,7 +5,6 @@
 
 import logging
 import js2py
-import hashlib
 import threading
 import re
 
@@ -139,7 +138,7 @@ def _script_eval_int(code, context = {}, cache = False):
         #OBSOLETE: key = "CONTEXT:" + str({x:context[x] for x in context_sorted}) + ",CODE:" + code
         key = "CONTEXT:" + str({x: (context[x] if script_eval_codecontext_signatures[codecontext_signature][x] == '' else {y: context[x][y] for y in sorted(context[x]) if y in script_eval_codecontext_signatures[codecontext_signature][x]}) for x in context_sorted if x in script_eval_codecontext_signatures[codecontext_signature]}) + ",CODE:" + code
       
-      keyhash = hashlib.md5(key.encode('utf-8')).hexdigest()
+      keyhash = utils.md5_hexdigest(key)
       with script_eval_cache_lock:
         if keyhash in script_eval_cache and script_eval_cache[keyhash]['key'] == key:
           script_eval_cache[keyhash]['used'] = system.time()

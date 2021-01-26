@@ -9,9 +9,29 @@ import traceback
 import json
 import base64
 import zlib
+import hashlib
 
 def log_stacktrace(message = 'current stacktrace'):
   logging.debug(message + ": " + ''.join(traceback.format_stack()))
+
+"""
+def dict_merge(dct, merge_dct, add_keys=True):
+  dct = dct.copy()
+  if not add_keys:
+    merge_dct = {
+      k: merge_dct[k]
+      for k in set(dct).intersection(set(merge_dct))
+    }
+
+  for k, v in merge_dct.items():
+    if (k in dct and isinstance(dct[k], dict)
+        and isinstance(merge_dct[k], collections.Mapping)):
+      dct[k] = dict_merge(dct[k], merge_dct[k], add_keys=add_keys)
+    else:
+      dct[k] = merge_dct[k]
+
+  return dct
+"""
 
 # @see https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
 # In alternativa, per un merge del solo top_level: v = {**a, **v}
@@ -36,21 +56,19 @@ def dict_merge(dct, merge_dct, add_keys=True):
   Returns:
     dict: updated dict
   """
-  dct = dct.copy()
-  if not add_keys:
-    merge_dct = {
-      k: merge_dct[k]
-      for k in set(dct).intersection(set(merge_dct))
-    }
+  if isinstance(dct, dict) and isinstance(merge_dct, collections.Mapping):
+    dct = dct.copy()
+    if not add_keys:
+      merge_dct = {
+        k: merge_dct[k]
+        for k in set(dct).intersection(set(merge_dct))
+      }
 
-  for k, v in merge_dct.items():
-    if (k in dct and isinstance(dct[k], dict)
-        and isinstance(merge_dct[k], collections.Mapping)):
-      dct[k] = dict_merge(dct[k], merge_dct[k], add_keys=add_keys)
-    else:
-      dct[k] = merge_dct[k]
+    for k, v in merge_dct.items():
+      dct[k] = dict_merge(dct[k] if k in dct else None, merge_dct[k], add_keys=add_keys)
 
-  return dct
+    return dct
+  return merge_dct
 
 def strftime(timestamp, tformat = '%Y-%m-%d %H:%M:%S'):
   return datetime.datetime.fromtimestamp(timestamp).strftime(tformat) if timestamp > 0 else '-'
@@ -158,8 +176,11 @@ def is_nan(v):
   except:
     return False
 
-def json_sorted_encode(data):
-  return json_export(data if not isinstance(data, dict) else {x:data[x] for x in sorted(data)})
+def json_sorted_encode(data, recursive = False):
+  return json_export(sort_map(data, recursive))
+
+def sort_map(data, recursive = False):
+  return data if not isinstance(data, dict) else {x:(sort_map(data[x]) if recursive else data[x]) for x in sorted(data)};
 
 def b64_compress_data(data):
   """
@@ -212,3 +233,13 @@ def array_max(a):
     if i is not None and (res is None or i > res):
       res = i
   return res
+
+def md5_hexdigest(string):
+  return hashlib.md5(string.encode('utf-8')).hexdigest()
+
+def data_signature(data):
+  try:
+    return md5_hexdigest(json_sorted_encode(data, True))
+  except:
+    return None
+  
