@@ -685,7 +685,7 @@ def entry_get(entry_id, local = False):
   """
   global all_entries
   eid = entry_id_find(entry_id)
-  return all_entries[eid] if eid else None
+  return all_entries[eid] if eid and (eid in all_entries) else None
 
 def entries_definition_exportable():
   global all_entries
