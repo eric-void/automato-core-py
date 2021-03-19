@@ -35,7 +35,7 @@ def dict_merge(dct, merge_dct, add_keys=True):
 
 # @see https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
 # In alternativa, per un merge del solo top_level: v = {**a, **v}
-def dict_merge(dct, merge_dct, add_keys=True):
+def dict_merge(dct, merge_dct, join_lists_depth = 0, add_keys = True):
   """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
   updating only top-level keys, dict_merge recurses down into dicts nested
   to an arbitrary depth, updating keys. The ``merge_dct`` is merged into
@@ -51,6 +51,8 @@ def dict_merge(dct, merge_dct, add_keys=True):
   Args:
     dct (dict) onto which the merge is executed
     merge_dct (dict): dct merged into dct
+    join_lists_depth (int): if != 0 two lists are joined together, and in recursive call this parameter is decremented by 1. If 0 merge_dct list will override dct one.
+      Use 0 to disable list joining, -1 to enable list joining for all levels, 2 to join only lists in first level (note that "1" is dct/merge_dct itself)
     add_keys (bool): whether to add new keys
 
   Returns:
@@ -65,10 +67,15 @@ def dict_merge(dct, merge_dct, add_keys=True):
       }
 
     for k, v in merge_dct.items():
-      dct[k] = dict_merge(dct[k] if k in dct else None, merge_dct[k], add_keys=add_keys)
+      dct[k] = dict_merge(dct[k] if k in dct else None, merge_dct[k], join_lists_depth = join_lists_depth - 1 if join_lists_depth else 0, add_keys=add_keys)
 
     return dct
+
+  if isinstance(dct, list) and isinstance(merge_dct, list) and join_lists_depth:
+    return dct + merge_dct
+    
   return merge_dct
+
 
 def strftime(timestamp, tformat = '%Y-%m-%d %H:%M:%S'):
   return datetime.datetime.fromtimestamp(timestamp).strftime(tformat) if timestamp > 0 else '-'

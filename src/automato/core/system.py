@@ -119,6 +119,16 @@ def _reset():
   handler_on_all_events = []
 
 def on_entry_load(handler):
+  """
+  @param handler: This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
+    You can classify entry loading phases with these references:
+    - loading_defs {entry_id: entry}: loading entries for this specific callback call, that must be processed
+    - system.entries(): ALL entries managed by the system, this contains already loaded and initialized, already loaded (by the current loading request) but NOT inizialized (passed in previous callback calls and processed), loading now (NOT initialized and, obviously, NOT processed by this call)
+    - for (entry in system.entries().values()) if entry.loaded: entries already loaded and initialized. Only these entries can be returned in this callback (to flag them as "must_reload")
+    - for (entry in system.entries().values()) if entry not in loading_defs: entries already loaded and initialized + entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+    - for (entry in system.entries().values()) if not entry.loaded and entry not in loading_defs: only entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
+    handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
+  """
   global handler_on_entry_load
   handler_on_entry_load.append(handler)
 
@@ -164,7 +174,8 @@ def init(callback):
   
   notifications.init()
   
-  entry_load_definitions(config['entries'], node_name = default_node_name, initial = True, id_from_definition = True, generate_new_entry_id_on_conflict = True)
+  #entry_load_definitions(config['entries'], node_name = default_node_name, initial = True, id_from_definition = True, generate_new_entry_id_on_conflict = True)
+  entry_load(config['entries'], node_name = default_node_name, id_from_definition = True, generate_new_entry_id_on_conflict = True)
 
   if handler_on_initialized:
     for h in handler_on_initialized:
@@ -322,9 +333,161 @@ class Entry(object):
   def _refresh_definition_based_properties(self):
     self.config = self.definition['config'] if 'config' in self.definition else {}
     self.caption = self.definition['caption'] if 'caption' in self.definition else self.id_local
+    if not 'publish' in self.definition:
+      self.definition['publish'] = {}
+    if not 'subscribe' in self.definition:
+      self.definition['subscribe'] = {}
+    if not 'on' in self.definition:
+      self.definition['on'] = {}
+    if not 'events_listen' in self.definition:
+      self.definition['events_listen'] = []
 
+"""
 def entry_load(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False, call_on_entries_change = True):
   global config, default_node_name, all_entries, all_entries_signatures, all_nodes, handler_on_entry_load, handler_on_entry_init, handler_on_entries_change
+  if not isinstance(definition, dict):
+    return None
+
+  if not from_node_name:
+    d = entry_id.find("@") if entry_id else -1
+    from_node_name = entry_id[d + 1:] if d >= 0 else default_node_name
+  
+  if not entry_id:
+    entry_id = definition['id'] if 'id' in definition else (definition['module'] if 'module' in definition else (definition['device'] if 'device' in definition else (definition['item'] if 'item' in definition else '')))
+  if not entry_id:
+    return None
+  entry_id = re.sub('[^A-Za-z0-9@_-]+', '-', entry_id)
+  d = entry_id.find("@")
+  if d < 0:
+    entry_id = entry_id + '@' + from_node_name
+    
+  if generate_new_entry_id_on_conflict and entry_id in all_entries:
+    d = entry_id.find("@")
+    entry_local_id = entry_id[:d]
+    entry_node_name = entry_id[d + 1:]
+    entry_id = entry_local_id
+    i = 0
+    while entry_id + '@' + entry_node_name in all_entries:
+      i += 1
+      entry_id = entry_local_id + '_' + str(i)
+    entry_id = entry_id + '@' + entry_node_name
+
+  new_signature = utils.data_signature(definition)
+  if entry_id in all_entries:
+    if new_signature and all_entries_signatures[entry_id] == new_signature:
+      return None
+    entry_unload(entry_id)
+  
+  logging.debug("SYSTEM> Loading entry {id} ...".format(id = entry_id))
+  entry = Entry(entry_id, definition, config)
+  entry.is_local = entry.node_name == default_node_name
+  
+  _entry_events_load(entry)
+  _entry_actions_load(entry)
+
+  if handler_on_entry_load:
+    for h in handler_on_entry_load:
+      h(entry)
+
+  entry._refresh_definition_based_properties()
+  
+  _entry_definition_normalize_after_load(entry)
+  _entry_events_install(entry)
+  _entry_actions_install(entry)
+  _entry_add_to_index(entry)
+  
+  all_entries[entry_id] = entry
+  all_entries_signatures[entry_id] = new_signature
+  if entry.node_name not in all_nodes:
+    all_nodes[entry.node_name] = {}
+
+  if handler_on_entry_init:
+    for h in handler_on_entry_init:
+      h(entry)
+      
+  logging.debug("SYSTEM> Loaded entry {id}.".format(id = entry_id))
+
+  if call_on_entries_change and handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h([entry.id], [])
+
+  return entry
+"""
+
+def entry_load(definitions, node_name = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
+  """
+  Load a batch of definitions to instantiate entries.
+  There are 2 phases for this process:
+  - in first one (_entry_load_definition) we load and process each entry definition. During this phase on_entry_load callback is called and can invalidate previously loaded (and initialized) entries, that must be unloaded and reloaded and injected in this phase.
+    in this phase a call to system.entries() will returns ALL entries, event the one loading right now (we can detect the state with entry.loaded flag)
+    load, entry_load, entry_install handlers are called in this phase
+  - in a second phase (_entry_load_init) all defined entries will be initialized
+    init handler is called in this phase
+  
+  @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
+  """
+  global all_entries, default_node_name, handler_on_entry_load, handler_on_entries_change
+  
+  if not node_name:
+    node_name = default_node_name
+  
+  loaded_defs = {}
+  loading_defs = {}
+  reload_definitions = {}
+  unloaded = []
+  while definitions:
+    for definition in definitions:
+      if not id_from_definition:
+        entry_id = definition
+        definition = definitions[entry_id]
+      else:
+        entry_id = False
+      if 'disabled' not in definition or not definition['disabled']:
+        entry = _entry_load_definition(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict)
+        if entry:
+          loading_defs[entry.id] = entry
+    logging.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format(entries = list(loading_defs.keys()) ))
+    if handler_on_entry_load:
+      for h in handler_on_entry_load:
+        reload_entries = h(loading_defs)
+        if reload_entries:
+          logging.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format(entries = reload_entries))
+          for rentry_id in reload_entries:
+            if rentry_id not in reload_definitions and rentry_id in all_entries:
+              reload_definitions[rentry_id] = all_entries[rentry_id].definition_loaded
+              entry_unload(rentry_id, call_on_entries_change = False)
+              unloaded.append(rentry_id)
+    if reload_definitions:
+      id_from_definition = False
+      definitions = reload_definitions
+      reload_definitions = {}
+    else:
+      definitions = False
+    for entry_id in loading_defs:
+      loaded_defs[entry_id] = loading_defs[entry_id]
+    loading_defs = {}
+  
+  if unload_other_from_node:
+    todo_unload = []
+    for entry_id in all_entries:
+      if all_entries[entry_id].node_name == node_name and entry_id not in loaded_defs:
+        todo_unload.append(entry_id)
+    for entry_id in todo_unload:
+      entry_unload(entry_id, call_on_entries_change = False)
+      unloaded.append(entry_id)
+
+  if loaded_defs:
+    logging.debug("SYSTEM> Loading entries, initializing {entries} ...".format(entries = list(loaded_defs.keys())))
+    for entry_id in loaded_defs:
+      _entry_load_init(loaded_defs[entry_id])
+    logging.debug("SYSTEM> Loaded entries {entries}.".format(entries = list(loaded_defs.keys())))
+      
+  if handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h(list(loaded_defs.keys()), unloaded)
+
+def _entry_load_definition(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False):
+  global config, default_node_name, all_entries, all_entries_signatures, all_nodes
   if not isinstance(definition, dict):
     return None
 
@@ -363,65 +526,72 @@ def entry_load(definition, from_node_name = False, entry_id = False, generate_ne
   
   _entry_events_load(entry)
   _entry_actions_load(entry)
-
-  if handler_on_entry_load:
-    for h in handler_on_entry_load:
-      h(entry)
-
   entry._refresh_definition_based_properties()
+  
+  entry.loaded = False
+  all_entries[entry.id] = entry
+  all_entries_signatures[entry.id] = new_signature
+  if entry.node_name not in all_nodes:
+    all_nodes[entry.node_name] = {}
 
+  return entry
+  
+def _entry_load_init(entry):
+  global handler_on_entry_init
+  
   _entry_definition_normalize_after_load(entry)
   _entry_events_install(entry)
   _entry_actions_install(entry)
   _entry_add_to_index(entry)
   
-  all_entries[entry_id] = entry
-  all_entries_signatures[entry_id] = new_signature
-  if entry.node_name not in all_nodes:
-    all_nodes[entry.node_name] = {}
-
   if handler_on_entry_init:
     for h in handler_on_entry_init:
       h(entry)
+
+  entry.loaded = True
+
+def entry_unload(entry_ids, call_on_entries_change = True):
+  global all_entries, all_entries_signatures, handler_on_entries_change
+  if isinstance(entry_ids, str):
+    entry_ids = [ entry_ids ]
+  for entry_id in entry_ids:
+    if entry_id in all_entries:
+      logging.debug("SYSTEM> Unloading entry {id} ...".format(id = entry_id))
+      if handler_on_entry_unload:
+        for h in handler_on_entry_unload:
+          h(all_entries[entry_id])
+
+      remove_event_listener_by_reference_entry(entry_id)
+      _entry_remove_from_index(all_entries[entry_id])
+      
+      del all_entries[entry_id]
+      del all_entries_signatures[entry_id]
+      
+      logging.debug("SYSTEM> Unloaded entry {id}.".format(id = entry_id))
       
   if call_on_entries_change and handler_on_entries_change:
     for h in handler_on_entries_change:
-      h([entry.id], [])
+      h([], entry_ids)
 
-  return entry
-
-def entry_unload(entry_id, call_on_entries_change = True):
-  global all_entries, all_entries_signatures, handler_on_entries_change
-  if entry_id in all_entries:
-    if handler_on_entry_unload:
-      for h in handler_on_entry_unload:
-        h(all_entries[entry_id])
-
-    remove_event_listener_by_reference_entry(entry_id)
-    _entry_remove_from_index(all_entries[entry_id])
-    
-    del all_entries[entry_id]
-    del all_entries_signatures[entry_id]
-    
-    if call_on_entries_change and handler_on_entries_change:
-      for h in handler_on_entries_change:
-        h([], [entry_id])
-
-def entry_reload(entry_id, call_on_entries_change = True):
+def entry_reload(entry_ids, call_on_entries_change = True):
   global all_entries, handler_on_entries_change
-  if entry_id in all_entries:
-    definition = all_entries[entry_id].definition_loaded
-    entry_unload(entry_id, call_on_entries_change = False)
-    entry_load(definition, None, entry_id, generate_new_entry_id_on_conflict = False, call_on_entries_change = False)
+  if isinstance(entry_ids, str):
+    entry_ids = [ entry_ids ]
+  for entry_id in entry_ids:
+    if entry_id in all_entries:
+      definition = all_entries[entry_id].definition_loaded
+      entry_unload(entry_id, call_on_entries_change = False)
+      entry_load(definition, None, entry_id, generate_new_entry_id_on_conflict = False, call_on_entries_change = False)
 
-    if call_on_entries_change and handler_on_entries_change:
-      for h in handler_on_entries_change:
-        h([entry_id], [entry_id])
+  if call_on_entries_change and handler_on_entries_change:
+    for h in handler_on_entries_change:
+      h(entry_ids, entry_ids)
 
-def entry_load_definitions(definitions, node_name = False, initial = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
-  """
+"""
+def (definitions, node_name = False, initial = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
+  " ""
   @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
-  """
+  " ""
   global all_entries, default_node_name, handler_on_entries_change
   
   if not node_name:
@@ -450,6 +620,7 @@ def entry_load_definitions(definitions, node_name = False, initial = False, unlo
   if handler_on_entries_change:
     for h in handler_on_entries_change:
       h(list(loaded.keys()), todo_unload)
+"""
 
 def entry_unload_node_entries(node_name):
   global all_entries, handler_on_entries_change
@@ -466,6 +637,9 @@ def entry_unload_node_entries(node_name):
       h([], todo_unload)
 
 def entries():
+  """
+  Returns ALL entries loaded, or in loading phase, by the system. To get only fully loaded (and initialized) entries look at entry.loaded flag
+  """
   global all_entries
   return all_entries
 
@@ -482,15 +656,6 @@ def entries():
 ###############################################################################################################################################################
 
 def _entry_definition_normalize_after_load(entry):
-  if not 'publish' in entry.definition:
-    entry.definition['publish'] = {}
-  if not 'subscribe' in entry.definition:
-    entry.definition['subscribe'] = {}
-  if not 'on' in entry.definition:
-    entry.definition['on'] = {}
-  if not 'events_listen' in entry.definition:
-    entry.definition['events_listen'] = {}
-    
   if entry.is_local:
     if not 'entry_topic' in entry.definition:
       entry.definition['entry_topic'] = entry.type + '/' + entry.id_local
@@ -647,8 +812,9 @@ def entry_definition_add_default(entry, default):
   """
   Use this method in "system_loaded" hook to add definitions to an entry, to be intended as base definitions (node config and module definitions and "load" hook will override them)
   Don't use this method AFTER "system_loaded" hook: during "entry_init" phase definitions are processed and normalized, and changing them could result in runtime errors.
+  NOTE: List settings in first-level (for example: required, events_listen, ...) are joined together. List settings in other levels are NOT joined (like all other primitive types).
   """
-  entry.definition = utils.dict_merge(default, entry.definition)
+  entry.definition = utils.dict_merge(default, entry.definition, join_lists_depth = 2) # 2 = lists in first level are joined
 
 def entry_id_match(entry, reference):
   """
