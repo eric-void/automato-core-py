@@ -174,7 +174,6 @@ def init(callback):
   
   notifications.init()
   
-  #entry_load_definitions(config['entries'], node_name = default_node_name, initial = True, id_from_definition = True, generate_new_entry_id_on_conflict = True)
   entry_load(config['entries'], node_name = default_node_name, id_from_definition = True, generate_new_entry_id_on_conflict = True)
 
   if handler_on_initialized:
@@ -186,7 +185,7 @@ def init(callback):
 def destroy():
   global all_entries, destroyed, subscription_thread
   while len(all_entries.keys()):
-    entry_unload(list(all_entries.keys())[0])
+    entry_unload(list(all_entries.keys()))
   
   destroyed = True
   notifications.destroy()
@@ -342,78 +341,6 @@ class Entry(object):
     if not 'events_listen' in self.definition:
       self.definition['events_listen'] = []
 
-"""
-def entry_load(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False, call_on_entries_change = True):
-  global config, default_node_name, all_entries, all_entries_signatures, all_nodes, handler_on_entry_load, handler_on_entry_init, handler_on_entries_change
-  if not isinstance(definition, dict):
-    return None
-
-  if not from_node_name:
-    d = entry_id.find("@") if entry_id else -1
-    from_node_name = entry_id[d + 1:] if d >= 0 else default_node_name
-  
-  if not entry_id:
-    entry_id = definition['id'] if 'id' in definition else (definition['module'] if 'module' in definition else (definition['device'] if 'device' in definition else (definition['item'] if 'item' in definition else '')))
-  if not entry_id:
-    return None
-  entry_id = re.sub('[^A-Za-z0-9@_-]+', '-', entry_id)
-  d = entry_id.find("@")
-  if d < 0:
-    entry_id = entry_id + '@' + from_node_name
-    
-  if generate_new_entry_id_on_conflict and entry_id in all_entries:
-    d = entry_id.find("@")
-    entry_local_id = entry_id[:d]
-    entry_node_name = entry_id[d + 1:]
-    entry_id = entry_local_id
-    i = 0
-    while entry_id + '@' + entry_node_name in all_entries:
-      i += 1
-      entry_id = entry_local_id + '_' + str(i)
-    entry_id = entry_id + '@' + entry_node_name
-
-  new_signature = utils.data_signature(definition)
-  if entry_id in all_entries:
-    if new_signature and all_entries_signatures[entry_id] == new_signature:
-      return None
-    entry_unload(entry_id)
-  
-  logging.debug("SYSTEM> Loading entry {id} ...".format(id = entry_id))
-  entry = Entry(entry_id, definition, config)
-  entry.is_local = entry.node_name == default_node_name
-  
-  _entry_events_load(entry)
-  _entry_actions_load(entry)
-
-  if handler_on_entry_load:
-    for h in handler_on_entry_load:
-      h(entry)
-
-  entry._refresh_definition_based_properties()
-  
-  _entry_definition_normalize_after_load(entry)
-  _entry_events_install(entry)
-  _entry_actions_install(entry)
-  _entry_add_to_index(entry)
-  
-  all_entries[entry_id] = entry
-  all_entries_signatures[entry_id] = new_signature
-  if entry.node_name not in all_nodes:
-    all_nodes[entry.node_name] = {}
-
-  if handler_on_entry_init:
-    for h in handler_on_entry_init:
-      h(entry)
-      
-  logging.debug("SYSTEM> Loaded entry {id}.".format(id = entry_id))
-
-  if call_on_entries_change and handler_on_entries_change:
-    for h in handler_on_entries_change:
-      h([entry.id], [])
-
-  return entry
-"""
-
 def entry_load(definitions, node_name = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
   """
   Load a batch of definitions to instantiate entries.
@@ -568,7 +495,10 @@ def entry_unload(entry_ids, call_on_entries_change = True):
       del all_entries_signatures[entry_id]
       
       logging.debug("SYSTEM> Unloaded entry {id}.".format(id = entry_id))
-      
+  
+  # TODO I need to reset topic_cache. I can improve this by resetting only topic matching entry unloading ones
+  topic_cache_reset()
+  
   if call_on_entries_change and handler_on_entries_change:
     for h in handler_on_entries_change:
       h([], entry_ids)
@@ -586,41 +516,6 @@ def entry_reload(entry_ids, call_on_entries_change = True):
   if call_on_entries_change and handler_on_entries_change:
     for h in handler_on_entries_change:
       h(entry_ids, entry_ids)
-
-"""
-def (definitions, node_name = False, initial = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
-  " ""
-  @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
-  " ""
-  global all_entries, default_node_name, handler_on_entries_change
-  
-  if not node_name:
-    node_name = default_node_name
-  
-  loaded = {}
-  for definition in definitions:
-    if not id_from_definition:
-      entry_id = definition
-      definition = definitions[entry_id]
-    else:
-      entry_id = False
-    if 'disabled' not in definition or not definition['disabled']:
-      entry = entry_load(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict, call_on_entries_change = False)
-      if entry:
-        loaded[entry.id] = entry
-
-  todo_unload = []
-  if unload_other_from_node:
-    for entry_id in all_entries:
-      if all_entries[entry_id].node_name == node_name and entry_id not in loaded:
-        todo_unload.append(entry_id)
-    for entry_id in todo_unload:
-      entry_unload(entry_id, call_on_entries_change = False)
-      
-  if handler_on_entries_change:
-    for h in handler_on_entries_change:
-      h(list(loaded.keys()), todo_unload)
-"""
 
 def entry_unload_node_entries(node_name):
   global all_entries, handler_on_entries_change
