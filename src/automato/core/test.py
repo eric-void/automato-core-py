@@ -207,7 +207,7 @@ def assertChild(name, assertEq = None, done = True):
   delete = []
   for check in checks:
     if 'child' in check and check['child'] == name:
-      unitname = check['unit'] + '.' + check['name']
+      unitname = check['unit'] + '.' + check['name'] if check['unit'] else False
       if assertEq:
         for d in assertEq:
           assertsRunning[unitname]['count'] += 1
@@ -221,8 +221,12 @@ def assertChild(name, assertEq = None, done = True):
         else:
           _assertsRunningDone(unitname, name + '.child', True)
         delete.append(check)
+
   for check in delete:
     checks.remove(check)
+    unitname = check['unit'] + '.' + check['name'] if check['unit'] else False
+    if unitname and unitname in assertsRunning and len(assertsRunning[unitname]['data']) >= assertsRunning[unitname]['count']:
+      assertDone(unitname)
 
 def assertDone(unitname, timeout = False):
   global assertsRunning, assertsDone
