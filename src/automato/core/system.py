@@ -954,7 +954,7 @@ def topic_subscription_is_internal(topic, payload = None, strict_match = False):
 
 def topic_subscription_definition(topic, payload = None, strict_match = False):
   """
-  Return subscription definition, if present, of a published topic
+  Return subscription definition, if present, of a subscribed topic
   If multiple subscriptions are found, first not internal is returned, if present (use "entries_subscribed_to" if you want them all)
   """
   global index_topic_subscribed
@@ -973,6 +973,8 @@ def topic_subscription_definition(topic, payload = None, strict_match = False):
 def entries_publishers_of(topic, payload = None, strict_match = False):
   """
   Search for all entries that can publish the topic passed, and return all topic metadatas (and matches, if subscribed with a regex pattern)
+  WARN: if a topic_rule has a topic_match_priority = 0 (usually because its defined as a "catchall" topic rule, like ['base/#': {}]), and the same topic matches a subscribed topic of the same entry, that entry will NOT be listed (the topic will be considered only as a subscribed one, and not a published one)
+  
   return {
     'ENTRY_ID': {
       'ENTRY_TOPIC': {
@@ -1006,15 +1008,17 @@ def entries_publishers_of(topic, payload = None, strict_match = False):
       for entry_id in t[1]['entries']:
         entry = entry_get(entry_id)
         if entry:
-          if entry_id in res and topic_match_priority(entry.definition['publish'][t[0]]) > topic_match_priority(res[entry_id]['definition']):
-            del res[entry_id]
-          if not entry_id in res:
-            res[entry_id] = {
-              'entry': entry,
-              'definition': entry.definition['publish'][t[0]],
-              'topic': t[0],
-              'matches': t[2],
-            }
+          tmp = topic_match_priority(entry.definition['publish'][t[0]])
+          if tmp > 0 or not entry_is_subscribed_to(entry, topic, payload):
+            if entry_id in res and tmp > topic_match_priority(res[entry_id]['definition']):
+              del res[entry_id]
+            if not entry_id in res:
+              res[entry_id] = {
+                'entry': entry,
+                'definition': entry.definition['publish'][t[0]],
+                'topic': t[0],
+                'matches': t[2],
+              }
         else:
           logging.error("SYSTEM> Internal error, entry references in index_topic_published not found: {entry_id}".format(entry_id = entry_id))
           
@@ -1060,9 +1064,39 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
           logging.error("SYSTEM> Internal error, entry references in index_topic_subscribed not found: {entry_id}".format(entry_id = entry_id))
   return res
 
+def entry_topic_published_definition(entry, topic, payload = None, strict_match = False, skip_topic_match_priority = False):
+  if topic in entry.definition['publish']:
+    return entry.definition['publish']
+  res = None
+  if not strict_match:
+    for topic_rule in entry.definition['publish']:
+      m = topic_matches(topic_rule, topic)
+      if m['matched']:
+        if skip_topic_match_priority:
+          return entry.definition['publish'][topic_rule]
+        if (not res) or topic_match_priority(entry.definition['publish'][topic_rule]) > topic_match_priority(res):
+          res = entry.definition['publish'][topic_rule]
+  return res
 
+def entry_is_publisher_of(entry, topic, payload = None):
+  return True if entry_topic_published_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) else False
 
+def entry_topic_subscription_definition(entry, topic, payload = None, strict_match = False, skip_topic_match_priority = False):
+  if topic in entry.definition['subscribe']:
+    return entry.definition['subscribe']
+  res = None
+  if not strict_match:
+    for topic_rule in entry.definition['subscribe']:
+      m = topic_matches(topic_rule, topic)
+      if m['matched']:
+        if skip_topic_match_priority:
+          return entry.definition['subscribe'][topic_rule]
+        if (not res) or topic_match_priority(entry.definition['subscribe'][topic_rule]) > topic_match_priority(res):
+          res = entry.definition['subscribe'][topic_rule]
+  return res
 
+def entry_is_subscribed_to(entry, topic, payload = None):
+  return True if entry_topic_subscription_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) else False
 
 
 ###############################################################################################################################################################
