@@ -109,10 +109,12 @@ def _reset():
   index_topic_subscribed = {}
   scripting_js.exports = exports
   
-  global handler_on_entry_load, handler_on_entry_unload, handler_on_entry_init, handler_on_entries_change, handler_on_initialized, handler_on_message, handler_on_all_events
+  global handler_on_entry_load, handler_on_entry_load_batch, handler_on_entry_unload, handler_on_entry_init, handler_on_entry_init_batch, handler_on_entries_change, handler_on_initialized, handler_on_message, handler_on_all_events
   handler_on_entry_load = []
+  handler_on_entry_load_batch = []
   handler_on_entry_unload = []
   handler_on_entry_init = []
+  handler_on_entry_init_batch = []
   handler_on_entries_change = []
   handler_on_initialized = []
   handler_on_message = []
@@ -120,7 +122,16 @@ def _reset():
 
 def on_entry_load(handler):
   """
-  @param handler: This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
+  Called during entry load phase, before on_entry_load_batch/on_entry_init/on_entry_init_batch, for every entry in loading phase
+  @param handler(entry)
+  """
+  global handler_on_entry_load
+  handler_on_entry_load.append(handler)
+
+def on_entry_load_batch(handler):
+  """
+  Called after on_entry_load, and before on_entry_init/on_entry_init_batch, with current batch of loading entries. 
+  @param handler(loading_defs: {entry_id: entry}): This callback can be called several time for a single batch of entries loading. If a call invalid previously loaded (and initialized entries), they will be passed in a new callback.
     You can classify entry loading phases with these references:
     - loading_defs {entry_id: entry}: loading entries for this specific callback call, that must be processed
     - system.entries(): ALL entries managed by the system, this contains already loaded and initialized, already loaded (by the current loading request) but NOT inizialized (passed in previous callback calls and processed), loading now (NOT initialized and, obviously, NOT processed by this call)
@@ -129,16 +140,28 @@ def on_entry_load(handler):
     - for (entry in system.entries().values()) if not entry.loaded and entry not in loading_defs: only entries already loaded (by the current loading request) but NOT inizialized. These have been passed in previous callback calls and processed by it.
     handler can return a list of ids of entries (already loaded and initialized) that must be unloaded and reloaded
   """
-  global handler_on_entry_load
-  handler_on_entry_load.append(handler)
+  global handler_on_entry_load_batch
+  handler_on_entry_load_batch.append(handler)
 
 def on_entry_unload(handler):
   global handler_on_entry_unload
   handler_on_entry_unload.append(handler)
 
 def on_entry_init(handler):
+  """
+  Called after on_entry_load/on_entry_load, and before on_entry_init_batch, for every entry loaded and initialized by the core system
+  @param handler(entry)
+  """
   global handler_on_entry_init
   handler_on_entry_init.append(handler)
+
+def on_entry_init_batch(handler):
+  """
+  Called after on_entry_init, with current batch of initialized entries
+  @param handler(entries: {entry_id: entry})
+  """
+  global handler_on_entry_init_batch
+  handler_on_entry_init_batch.append(handler)
 
 """
 @param handler (entry_ids_loaded, entry_ids_unloaded)
@@ -372,10 +395,13 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
       if 'disabled' not in definition or not definition['disabled']:
         entry = _entry_load_definition(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict)
         if entry:
+          if handler_on_entry_load:
+            for h in handler_on_entry_load:
+              h(entry)
           loading_defs[entry.id] = entry
     logging.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format(entries = list(loading_defs.keys()) ))
-    if handler_on_entry_load:
-      for h in handler_on_entry_load:
+    if handler_on_entry_load_batch:
+      for h in handler_on_entry_load_batch:
         reload_entries = h(loading_defs)
         if reload_entries:
           logging.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format(entries = reload_entries))
@@ -407,6 +433,12 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
     logging.debug("SYSTEM> Loading entries, initializing {entries} ...".format(entries = list(loaded_defs.keys())))
     for entry_id in loaded_defs:
       _entry_load_init(loaded_defs[entry_id])
+      if handler_on_entry_init:
+        for h in handler_on_entry_init:
+          h(loaded_defs[entry_id])
+    if handler_on_entry_init_batch:
+      for h in handler_on_entry_init_batch:
+        h(loaded_defs)
     logging.debug("SYSTEM> Loaded entries {entries}.".format(entries = list(loaded_defs.keys())))
       
   if handler_on_entries_change:
@@ -471,10 +503,6 @@ def _entry_load_init(entry):
   _entry_actions_install(entry)
   _entry_add_to_index(entry)
   
-  if handler_on_entry_init:
-    for h in handler_on_entry_init:
-      h(entry)
-
   entry.loaded = True
 
 def entry_unload(entry_ids, call_on_entries_change = True):
