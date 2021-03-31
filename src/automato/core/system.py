@@ -332,17 +332,18 @@ class Entry(object):
     if d < 0:
       logging.error("SYSTEM> Invalid entry id: {entry_id}, entry not loaded".format(entry_id = entry_id))
       return None
+
+    self.definition = copy.deepcopy(definition) # WARN! Do not modify definition in code below, only self.definition
+    self.definition_loaded = copy.deepcopy(definition)
     
     self.id = entry_id
     self.id_local = entry_id[:d]
     self.node_name = entry_id[d + 1:]
     self.is_local = None
     self.node_config = config
-    if 'type' not in definition:
-      definition['type'] = 'module' if 'module' in definition else ('device' if 'device' in definition else 'item')
-    self.type = definition['type']
-    self.definition = definition
-    self.definition_loaded = copy.deepcopy(definition)
+    if 'type' not in self.definition:
+      self.definition['type'] = 'module' if 'module' in definition else ('device' if 'device' in self.definition else 'item')
+    self.type = self.definition['type']
     self.created = time()
     self.last_seen = 0
     self.exports = exports
@@ -376,7 +377,7 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
   
   @param id_from_definition. If True: definitions = [ { ...definition...} ]; if False: definitions = { 'entry_id': { ... definition ... } }
   """
-  global all_entries, default_node_name, handler_on_entry_load, handler_on_entries_change
+  global all_entries, default_node_name, handler_on_entry_load, handler_on_entry_load_batch, handler_on_entry_init, handler_on_entry_init_batch, handler_on_entries_change
   
   if not node_name:
     node_name = default_node_name
@@ -399,17 +400,18 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
             for h in handler_on_entry_load:
               h(entry)
           loading_defs[entry.id] = entry
-    logging.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format(entries = list(loading_defs.keys()) ))
-    if handler_on_entry_load_batch:
-      for h in handler_on_entry_load_batch:
-        reload_entries = h(loading_defs)
-        if reload_entries:
-          logging.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format(entries = reload_entries))
-          for rentry_id in reload_entries:
-            if rentry_id not in reload_definitions and rentry_id in all_entries:
-              reload_definitions[rentry_id] = all_entries[rentry_id].definition_loaded
-              entry_unload(rentry_id, call_on_entries_change = False)
-              unloaded.append(rentry_id)
+    if loading_defs:
+      logging.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format(entries = list(loading_defs.keys()) ))
+      if handler_on_entry_load_batch:
+        for h in handler_on_entry_load_batch:
+          reload_entries = h(loading_defs)
+          if reload_entries:
+            logging.debug("SYSTEM> Loading entries, need to reload other entries {entries} ...".format(entries = reload_entries))
+            for rentry_id in reload_entries:
+              if rentry_id not in reload_definitions and rentry_id in all_entries:
+                reload_definitions[rentry_id] = all_entries[rentry_id].definition_loaded
+                entry_unload(rentry_id, call_on_entries_change = False)
+                unloaded.append(rentry_id)
     if reload_definitions:
       id_from_definition = False
       definitions = reload_definitions
@@ -430,17 +432,28 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
       unloaded.append(entry_id)
 
   if loaded_defs:
-    logging.debug("SYSTEM> Loading entries, initializing {entries} ...".format(entries = list(loaded_defs.keys())))
+    # Final loading phase, install final features. This must be done BEFORE init hooks (they must receive a fully loaded entry)
     for entry_id in loaded_defs:
-      _entry_load_init(loaded_defs[entry_id])
+      _entry_definition_normalize_after_load(loaded_defs[entry_id])
+      _entry_events_install(loaded_defs[entry_id])
+      _entry_actions_install(loaded_defs[entry_id])
+      _entry_add_to_index(loaded_defs[entry_id])
+      loaded_defs[entry_id].loaded = True
+
+    logging.debug("SYSTEM> Loading entries, initializing {entries} ...".format(entries = list(loaded_defs.keys())))
+    # Calls handler_on_entry_init
+    for entry_id in loaded_defs:
       if handler_on_entry_init:
         for h in handler_on_entry_init:
           h(loaded_defs[entry_id])
+    # Calls handler_on_entry_init_batch
     if handler_on_entry_init_batch:
       for h in handler_on_entry_init_batch:
         h(loaded_defs)
+
     logging.debug("SYSTEM> Loaded entries {entries}.".format(entries = list(loaded_defs.keys())))
-      
+
+  # Calls handler_on_entries_change
   if handler_on_entries_change:
     for h in handler_on_entries_change:
       h(list(loaded_defs.keys()), unloaded)
@@ -478,6 +491,7 @@ def _entry_load_definition(definition, from_node_name = False, entry_id = False,
   if entry_id in all_entries:
     if new_signature and all_entries_signatures[entry_id] == new_signature:
       return None
+    logging.debug("SYSTEM> Entry definition for {entry} changed signature, reloading it...".format(entry = entry_id))
     entry_unload(entry_id)
   
   entry = Entry(entry_id, definition, config)
@@ -495,16 +509,6 @@ def _entry_load_definition(definition, from_node_name = False, entry_id = False,
 
   return entry
   
-def _entry_load_init(entry):
-  global handler_on_entry_init
-  
-  _entry_definition_normalize_after_load(entry)
-  _entry_events_install(entry)
-  _entry_actions_install(entry)
-  _entry_add_to_index(entry)
-  
-  entry.loaded = True
-
 def entry_unload(entry_ids, call_on_entries_change = True):
   global all_entries, all_entries_signatures, handler_on_entries_change
   if isinstance(entry_ids, str):
