@@ -11,6 +11,7 @@ import base64
 import zlib
 import hashlib
 import math
+import re
 
 def log_stacktrace(message = 'current stacktrace'):
   logging.debug(message + ": " + ''.join(traceback.format_stack()))
@@ -250,4 +251,14 @@ def data_signature(data):
     return md5_hexdigest(json_sorted_encode(data, True))
   except:
     return None
+
+_re_camel_to_snake_case1 = re.compile('(.)([A-Z][a-z]+)')
+_re_camel_to_snake_case2 = re.compile('__([A-Z])')
+_re_camel_to_snake_case3 = re.compile('([a-z0-9])([A-Z])')
+
+def camel_to_snake_case(string):
+  string = _re_camel_to_snake_case1.sub(r'\1_\2', string)
+  string = _re_camel_to_snake_case2.sub(r'_\1', string)
+  string = _re_camel_to_snake_case3.sub(r'\1_\2', string)
+  return string.lower()
   

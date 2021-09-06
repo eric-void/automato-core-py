@@ -47,6 +47,7 @@ def script_context(context = {}):
     'is_array': _is_array,
     'print': _print,
     'str': str,
+    'camel_to_snake_case': _camel_to_snake_case,
     '_': _translate,
     
     ** exports,
@@ -223,3 +224,6 @@ def _is_dict(v):
 
 def _is_array(v):
   return isinstance(v, js2py.base.PyJsArray) or isinstance(v, list)
+
+def _camel_to_snake_case(v):
+  return utils.camel_to_snake_case(_var_to_python(v))
