@@ -30,6 +30,8 @@ destroyed = False
 mqtt_communication_thread = False
 mqtt_communication_queue = None
 mqtt_communication_queue_only_subscribe = True # False = use queue for publish and subscribe, True = use it only for subscribe
+mqtt_communication_recent_delay = 0
+mqtt_communication_recent_delay_timems = 0
 
 # Used by test environment, to "pause" the mqtt listening thread
 mqtt_subscribe_pause_on_topic = None
@@ -132,23 +134,37 @@ def queueDelay():
   """
   @return ms of delay in current messages queue
   """
+  """
   global mqtt_communication_queue
   try:
     return system.timems() - mqtt_communication_queue.queue[0]['timems'] if mqtt_communication_queue.queue else 0
   except:
     return 0
+  """
+  global mqtt_communication_recent_delay
+  return mqtt_communication_recent_delay
 
 def _mqtt_communication_thread():
-  global connected_since, destroyed, settings, mqtt_communication_queue, mqtt_subscribe_pause_on_topic, cache
+  global connected_since, destroyed, settings, mqtt_communication_queue, mqtt_subscribe_pause_on_topic, cache, mqtt_communication_recent_delay, mqtt_communication_recent_delay_timems
   #logging.debug("THREAD IN")
   while not destroyed:
     #logging.debug("THREAD .")
     d = mqtt_communication_queue.get()
+    timems = system.timems()
     #logging.debug("QUEUE GOT: " + str(d))
-    delay = system.timems() - d['timems']
-    # Ignoring first 60 seconds from mqtt connections for warnings: i can receive a lot of retained messages, a slowdown is normal!
-    if system.time() > connected_since + 60 and delay > settings['warning_slow_queue_ms']:
+    delay = timems - d['timems']
+    # Ignoring first 300 seconds from mqtt connections for warnings: i can receive a lot of retained messages, a slowdown is normal!
+    if system.time() > connected_since + 300 and delay > settings['warning_slow_queue_ms']:
       logging.warning("Slow mqtt_communication_queue, last message fetched in {ms} ms: {msg}".format(ms = delay, msg = d))
+    if mqtt_communication_recent_delay > 0 and mqtt_communication_recent_delay_timems < timems - 60000:
+      mqtt_communication_recent_delay = mqtt_communication_recent_delay / pow(2, (timems - mqtt_communication_recent_delay_timems) / 1000)
+      if mqtt_communication_recent_delay < 1000:
+        mqtt_communication_recent_delay = 0
+      mqtt_communication_recent_delay_timems = timems if mqtt_communication_recent_delay > 0 else 0
+    if delay > mqtt_communication_recent_delay:
+      mqtt_communication_recent_delay = delay
+      mqtt_communication_recent_delay_timems = timems
+
     if d['type'] == 'publish':
       _mqtt_communication_publish(d['topic'], d['payload'], d['qos'], d['retain'])
 
