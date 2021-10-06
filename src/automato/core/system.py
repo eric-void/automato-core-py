@@ -45,10 +45,6 @@ ENTRY_DEFINITION_EXPORTABLE = {
 PRIMITIVE_TYPES = (int, str, bool, float, dict, list)
 EVENT_KEYS = ['port']
 
-index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} }
-INDEX_TOPIC_CACHE_MAXSIZE = 1024
-INDEX_TOPIC_CACHE_PURGETIME = 3600
-
 import time as core_time
 import logging
 import sys
@@ -62,6 +58,11 @@ from automato.core import system_extra
 from automato.core import scripting_js
 from automato.core import notifications
 from automato.core import utils
+
+index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} }
+index_topic_cache_lock = threading.Lock()
+INDEX_TOPIC_CACHE_MAXSIZE = 1024
+INDEX_TOPIC_CACHE_PURGETIME = 3600
 
 destroyed = False
 test_mode = False
@@ -900,57 +901,59 @@ def topic_match_priority(definition):
   return 0
 
 def topic_cache_reset():
-  global index_topic_cache
-  index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } }
+  global index_topic_cache, index_topic_cache_lock
+  with index_topic_cache_lock:
+    index_topic_cache = { 'hits': 0, 'miss': 0, 'data': { } }
 
 def topic_cache_find(index, cache_key, topic, payload = None):
   """
   @param index is { topic:  { 'definition': { ... merged definition from all TOPIC published by entries ... }, 'entries': [ ... entry ids ... ]};
   @return (0: topic rule found, 1: topic metadata { 'definition': { ... merged definition from all topic published by entries ... }, 'entries': [ ... entry ids ... ]}, 2: matches)
   """
-  global index_topic_cache
+  global index_topic_cache, index_topic_cache_lock
   
-  if cache_key not in index_topic_cache['data']:
-    index_topic_cache['data'][cache_key] = {}
+  with index_topic_cache_lock:
+    if cache_key not in index_topic_cache['data']:
+      index_topic_cache['data'][cache_key] = {}
 
-  if len(index_topic_cache['data'][cache_key]) > INDEX_TOPIC_CACHE_MAXSIZE:
-    t = INDEX_TOPIC_CACHE_PURGETIME
-    while len(index_topic_cache['data'][cache_key]) > INDEX_TOPIC_CACHE_MAXSIZE:
-      index_topic_cache['data'][cache_key] = {x:index_topic_cache['data'][cache_key][x] for x in index_topic_cache['data'][cache_key] if index_topic_cache['data'][cache_key][x]['used'] > time() - t}
-      t = t / 2 if t > 1 else -1
+    if len(index_topic_cache['data'][cache_key]) > INDEX_TOPIC_CACHE_MAXSIZE:
+      t = INDEX_TOPIC_CACHE_PURGETIME
+      while len(index_topic_cache['data'][cache_key]) > INDEX_TOPIC_CACHE_MAXSIZE:
+        index_topic_cache['data'][cache_key] = {x:index_topic_cache['data'][cache_key][x] for x in index_topic_cache['data'][cache_key] if index_topic_cache['data'][cache_key][x]['used'] > time() - t}
+        t = t / 2 if t > 1 else -1
 
-  topic_and_payload = None
-  if topic in index_topic_cache['data'][cache_key]:
-    if not 'use_payload' in index_topic_cache['data'][cache_key][topic]:
-      index_topic_cache['data'][cache_key][topic]['used'] = time()
-      index_topic_cache['hits'] += 1
-      return index_topic_cache['data'][cache_key][topic]['result']
-    else:
-      topic_and_payload = topic + "[" + message_payload_serialize(payload) + "]"
-      if topic_and_payload in index_topic_cache['data'][cache_key]:
+    topic_and_payload = None
+    if topic in index_topic_cache['data'][cache_key]:
+      if not 'use_payload' in index_topic_cache['data'][cache_key][topic]:
         index_topic_cache['data'][cache_key][topic]['used'] = time()
-        index_topic_cache['data'][cache_key][topic_and_payload]['used'] = time()
         index_topic_cache['hits'] += 1
-        return index_topic_cache['data'][cache_key][topic_and_payload]['result']
-  
-  index_topic_cache['miss'] += 1
-  res = { 'used': time(), 'result': [] }
-  use_payload = False
-  for itopic in index:
-    m = topic_matches(itopic, topic, payload)
-    if m['matched']:
-      res['result'].append((itopic, index[itopic], m['topic_matches']))
-    if m['use_payload']:
-      use_payload = True
-  if not use_payload:
-    index_topic_cache['data'][cache_key][topic] = res
-  else:
-    index_topic_cache['data'][cache_key][topic] = { 'use_payload': True, 'used': time() }
-    if topic_and_payload is None:
-      topic_and_payload = topic + "[" + message_payload_serialize(payload) + "]"
-    index_topic_cache['data'][cache_key][topic_and_payload] = res
+        return index_topic_cache['data'][cache_key][topic]['result']
+      else:
+        topic_and_payload = topic + "[" + message_payload_serialize(payload) + "]"
+        if topic_and_payload in index_topic_cache['data'][cache_key]:
+          index_topic_cache['data'][cache_key][topic]['used'] = time()
+          index_topic_cache['data'][cache_key][topic_and_payload]['used'] = time()
+          index_topic_cache['hits'] += 1
+          return index_topic_cache['data'][cache_key][topic_and_payload]['result']
+    
+    index_topic_cache['miss'] += 1
+    res = { 'used': time(), 'result': [] }
+    use_payload = False
+    for itopic in index:
+      m = topic_matches(itopic, topic, payload)
+      if m['matched']:
+        res['result'].append((itopic, index[itopic], m['topic_matches']))
+      if m['use_payload']:
+        use_payload = True
+    if not use_payload:
+      index_topic_cache['data'][cache_key][topic] = res
+    else:
+      index_topic_cache['data'][cache_key][topic] = { 'use_payload': True, 'used': time() }
+      if topic_and_payload is None:
+        topic_and_payload = topic + "[" + message_payload_serialize(payload) + "]"
+      index_topic_cache['data'][cache_key][topic_and_payload] = res
 
-  return res['result']
+    return res['result']
 
 def topic_published_definition_is_internal(definition):
   return not (definition and ('description' in definition or 'type' in definition))
