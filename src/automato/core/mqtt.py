@@ -132,17 +132,20 @@ def _onDisconnect(client, userdata, rc):
 
 def queueDelay():
   """
-  @return ms of delay in current messages queue
+  @return ms of delay in current messages queue (max delay in last minute)
   """
+  global mqtt_communication_recent_delay
+  return mqtt_communication_recent_delay
+
+def queueDelayCurrent():
+  """
+  @return ms of delay in current messages queue (actual)
   """
   global mqtt_communication_queue
   try:
     return system.timems() - mqtt_communication_queue.queue[0]['timems'] if mqtt_communication_queue.queue else 0
   except:
     return 0
-  """
-  global mqtt_communication_recent_delay
-  return mqtt_communication_recent_delay
 
 def _mqtt_communication_thread():
   global connected_since, destroyed, settings, mqtt_communication_queue, mqtt_subscribe_pause_on_topic, cache, mqtt_communication_recent_delay, mqtt_communication_recent_delay_timems
