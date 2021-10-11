@@ -386,6 +386,7 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
   loaded_defs = {}
   loading_defs = {}
   reload_definitions = {}
+  skipped_ids = []
   unloaded = []
   while definitions:
     for definition in definitions:
@@ -395,12 +396,14 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
       else:
         entry_id = False
       if 'disabled' not in definition or not definition['disabled']:
-        entry = _entry_load_definition(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict)
-        if entry:
+        result = _entry_load_definition(definition, from_node_name = node_name, entry_id = entry_id, generate_new_entry_id_on_conflict = generate_new_entry_id_on_conflict, extended_result = True)
+        if result and result['entry']:
           if handler_on_entry_load:
             for h in handler_on_entry_load:
-              h(entry)
-          loading_defs[entry.id] = entry
+              h(result['entry'])
+          loading_defs[result['entry'].id] = result['entry']
+        elif result['message'] == 'no_changes':
+          skipped_ids.append(result['id'])
     if loading_defs:
       logging.debug("SYSTEM> Loading entries, loaded definitions for {entries} ...".format(entries = list(loading_defs.keys()) ))
       if handler_on_entry_load_batch:
@@ -426,7 +429,7 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
   if unload_other_from_node:
     todo_unload = []
     for entry_id in all_entries:
-      if all_entries[entry_id].node_name == node_name and entry_id not in loaded_defs:
+      if all_entries[entry_id].node_name == node_name and entry_id not in loaded_defs and entry_id not in skipped_ids:
         todo_unload.append(entry_id)
     for entry_id in todo_unload:
       entry_unload(entry_id, call_on_entries_change = False)
@@ -459,10 +462,10 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
     for h in handler_on_entries_change:
       h(list(loaded_defs.keys()), unloaded)
 
-def _entry_load_definition(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False):
+def _entry_load_definition(definition, from_node_name = False, entry_id = False, generate_new_entry_id_on_conflict = False, extended_result = False):
   global config, default_node_name, all_entries, all_entries_signatures, all_nodes
   if not isinstance(definition, dict):
-    return None
+    return None if not extended_result else { "entry": None, "id": entry_id, "message": "error_invalid_definition" }
 
   if not from_node_name:
     d = entry_id.find("@") if entry_id else -1
@@ -471,7 +474,7 @@ def _entry_load_definition(definition, from_node_name = False, entry_id = False,
   if not entry_id:
     entry_id = definition['id'] if 'id' in definition else (definition['module'] if 'module' in definition else (definition['device'] if 'device' in definition else (definition['item'] if 'item' in definition else '')))
   if not entry_id:
-    return None
+    return None if not extended_result else { "entry": None, "id": entry_id, "message": "error_no_id" }
   entry_id = re.sub('[^A-Za-z0-9@_-]+', '-', entry_id)
   d = entry_id.find("@")
   if d < 0:
@@ -491,7 +494,7 @@ def _entry_load_definition(definition, from_node_name = False, entry_id = False,
   new_signature = utils.data_signature(definition)
   if entry_id in all_entries:
     if new_signature and all_entries_signatures[entry_id] == new_signature:
-      return None
+      return None if not extended_result else { "entry": None, "id": entry_id, "message": "no_changes" }
     logging.debug("SYSTEM> Entry definition for {entry} changed signature, reloading it...".format(entry = entry_id))
     entry_unload(entry_id)
   
@@ -508,7 +511,7 @@ def _entry_load_definition(definition, from_node_name = False, entry_id = False,
   if entry.node_name not in all_nodes:
     all_nodes[entry.node_name] = {}
 
-  return entry
+  return entry if not extended_result else { "entry": entry, "id": entry_id, "message": None }
   
 def entry_unload(entry_ids, call_on_entries_change = True):
   global all_entries, all_entries_signatures, handler_on_entries_change
