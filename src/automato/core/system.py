@@ -305,12 +305,12 @@ def _stats_show():
     if perc >= 5:
       stats += '    ' + str(s).ljust(80, " ") + ' (' + str(perc) + '‰): { count: ' + str(ss[s]['count']) + ', avg: ' + str(round(ss[s]['avg'])) + 'ms, max: ' + str(round(ss[s]['max'])) + 'ms }\n';
   logging.debug(('SYSTEM> DEBUG TIMINGS\n  total: {total}min\n' +
-    '  mqtt_queue_delay: {delay}ms\n' + 
+    '  mqtt_queue_delay: {delay}ms (current: {cdelay}ms)\n' + 
     '  script_eval_cache: {schits}/{sctotal} hits ({scperc}%), {scsize} size, {scskip} uncacheable, {scdisabled} cache disabled, {scsign} signatures\n' + 
     '  topic cache: {tphits}/{tptotal} ({tpperc}%) hits, {tpsize} size\n' + 
     '  system_stats:\n{stats}').format(
     total = round(total / 60000),
-    delay = mqtt.queueDelay(),
+    delay = mqtt.queueDelay(), cdelay = mqtt.queueDelayCurrent(),
     schits = scripting_js.script_eval_cache_hits, sctotal = scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss, scperc = round(scripting_js.script_eval_cache_hits * 100 / (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss)) if (scripting_js.script_eval_cache_hits + scripting_js.script_eval_cache_miss) > 0 else 0, scsize = len(scripting_js.script_eval_cache), scskip =  scripting_js.script_eval_cache_skipped, scdisabled = scripting_js.script_eval_cache_disabled, scsign = len(scripting_js.script_eval_codecontext_signatures),
     tphits = index_topic_cache['hits'], tptotal = index_topic_cache['hits'] + index_topic_cache['miss'], tpperc = round(index_topic_cache['hits'] * 100 / (index_topic_cache['hits'] + index_topic_cache['miss'])) if (index_topic_cache['hits'] + index_topic_cache['miss']) > 0 else 0, tpsize = sum([len(index_topic_cache['data'][i]) for i in index_topic_cache['data']]),
     stats = stats
