@@ -1464,12 +1464,12 @@ def _entry_event_invoke_listeners(entry, eventdata, caller, published_message = 
             _s = _stats_start()
             if condition is None or _entry_event_params_match_condition(eventdata, condition):
               #logging.debug("_entry_event_invoke_listeners_GO")
-              listener(entry, eventname, eventdata, caller, published_message)
+              listener(entry, eventname, copy.deepcopy(eventdata), caller, published_message)
             _stats_end('event_listener(' + str(listener) + '|' + str(condition) + ')', _s)
             
   if handler_on_all_events:
     for h in handler_on_all_events:
-      h(entry, eventname, eventdata, caller, published_message)
+      h(entry, eventname, copy.deepcopy(eventdata), caller, published_message)
 
 def _entry_event_params_match_condition(eventdata, condition):
   """

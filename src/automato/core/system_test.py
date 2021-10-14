@@ -318,6 +318,8 @@ def on_test_on_event1(entry, eventname, eventdata, caller, published_message):
     test.assertChild('entry_a_on_test_event1', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "test1"})])
   elif test.isRunning('s2'):
     test.assertChild('entry_a_on_test_event1', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "1"})])
+    # Important test: a listener can manipulate input data, but it's intended as local manipulation only, changed data MUST not be propagated to other listeners. If below change is propagated, listener "on_test_on_event2" won't be called and test fails
+    eventdata['params']['port'] = "2"
 
 def on_test_on_event2(entry, eventname, eventdata, caller, published_message):
   test.assertChild('entry_a_on_test_event2', assertEq = [(entry.id, "entry_b@TEST"), (eventname, "test_event"), (eventdata['params'], {"port": "1"})])
