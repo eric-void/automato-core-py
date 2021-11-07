@@ -40,6 +40,8 @@ ENTRY_DEFINITION_EXPORTABLE = {
     "actions": True,
     "topic_match_priority": True,
   },
+  'events': True,
+  'actions': True,
   'events_passthrough': True,
 }
 PRIMITIVE_TYPES = (int, str, bool, float, dict, list)
