@@ -147,6 +147,12 @@ def queueDelayCurrent():
   except:
     return 0
 
+def queueTimems():
+  try:
+    return mqtt_communication_queue.queue[0]['timems'] if mqtt_communication_queue.queue else 0
+  except:
+    return 0
+
 def _mqtt_communication_thread():
   global connected_since, destroyed, settings, mqtt_communication_queue, mqtt_subscribe_pause_on_topic, cache, mqtt_communication_recent_delay, mqtt_communication_recent_delay_timems
   #logging.debug("THREAD IN")
