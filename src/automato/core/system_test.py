@@ -134,7 +134,7 @@ def test_init():
       },
 
       ####################################################################################
-      ### TEST multiple events / event:init
+      ### TEST multiple events / event:init / event groups
       {
         "item": "entry_e",
         "events_listen": [ ".data" ],
@@ -142,8 +142,19 @@ def test_init():
           "./event": { "type": "object", "events": { 
             "data": ["js:(payload)","js:({'port': '1', 'value': 1})"],
             "data:init": [{"all": 1}, { "port": "1", "unit": "A"}, { "port": "2", "unit": "B" }],
+          } },
+          "./group": { "type": "object", "events": { 
+            "egroup": ["js:(payload)"],
           } }
         },
+        "events": {
+          "egroup:group": 60
+        },
+        "on": {
+          ".egroup": {
+            "handler": on_test_on_entry_e_group,
+          },
+        }
       },
     ]
   }
@@ -262,7 +273,7 @@ def test_run(entries):
     
   
   ####################################################################################
-  ### TEST multiple events / event:init
+  ### TEST multiple events / event:init / event groups
   
   if (True):
     # this one publish an event {'port': '2', 'x': 'y'} and an event {'port': 1, 'value': 1}
@@ -285,7 +296,13 @@ def test_run(entries):
       ])
     if test_history:
       entries['history@TEST'].module.run(entries['history@TEST'])
-      
+
+    test.assertPublish('e20', 'item/entry_e/group', { 'v1': 1 }, assertNotChild = ['entry_e.on_group_event'], timeoutms = 1000, wait = False)
+    test.assertPublish('e21', 'item/entry_e/group', { 'v2': 2 }, assertNotChild = ['entry_e.on_group_event'], timeoutms = 1000, wait = False)
+    test.waitRunning()
+    system.time_offset(60)
+    test.assertx('e22', assertChild = ['entry_e.on_group_event'])
+    
     
   ####################################################################################
   ### TEST topic_matches
@@ -349,3 +366,6 @@ def on_subscribed_message2(entry, subscribed_message):
 def publish(entry, topic_rule, topic_definition):
   entry.publish('', 'ok')
   test.assertChild('entry_b_publish', assertEq = [(entry.id, "entry_b@TEST"), (topic_rule, "subs/entry_b/response"), (topic_definition["description"], "test response su subs/entry_b")])
+
+def on_test_on_entry_e_group(entry, eventname, eventdata, caller, published_message):
+  test.assertChild('entry_e.on_group_event', assertEq = [(eventdata['params'], {'v1': 1, 'v2': 2}), (caller, "group"), (published_message, None)])
