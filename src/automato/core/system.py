@@ -96,7 +96,7 @@ def boot():
     mqtt.config(config['mqtt'])
 
 def _reset():
-  global all_entries, all_entries_signatures, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, index_topic_published, index_topic_subscribed
+  global all_entries, all_entries_signatures, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, events_groups, index_topic_published, index_topic_subscribed
   all_entries = {}
   all_entries_signatures = {}
   all_nodes = {}
@@ -106,6 +106,7 @@ def _reset():
   events_listeners = {}
   events_published = {}
   events_published_lock = threading.Lock()
+  events_groups = {}
   index_topic_published = {}
   index_topic_subscribed = {}
   scripting_js.exports = exports
@@ -1263,7 +1264,8 @@ class PublishedMessage(object):
                   _s = _stats_start()
                   eventdata = _entry_event_publish(self.entry, event['name'], event['params'], time() if not self.message.retain else 0)
                   _stats_end('PublishedMessages.event_publish', _s)
-                  self._events.append(eventdata)
+                  if eventdata:
+                    self._events.append(eventdata)
     return self._events
   
   def _notificationBuild(self):
@@ -1363,14 +1365,23 @@ def _entry_event_publish(entry, eventname, params, time):
   Note: if an event has no "event_keys", it's data will be setted to all other stored data (of events with keys_index). If a new keys_index occours, the data will be merged with "no params-key" data.
   @param time timestamp event has been published, 0 if from a retained message, -1 if from an event data initialization, -X if from a stored event data (X is the original time)
   """
-  global events_published, events_published_lock
+  global events_groups
   #logging.debug("SYSTEM> Published event " + entry.id + "." + eventname + " = " + str(params))
   
   data = { 'name': eventname, 'time': time, 'params': params, 'changed_params': {}, 'keys': {} }
   event_keys = entry_event_keys(entry, eventname)
   data['keys'] = {k:params[k] for k in event_keys if params and k in params}
   keys_index = entry_event_keys_index(data['keys'])
+  
+  if time > 0 and entry.id + '.' + eventname in events_groups:
+    events_groups_push(entry.id + '.' + eventname, entry, data, event_keys, keys_index)
+    return None
+  
+  return _entry_event_publish_internal(entry, eventname, params, time, data, event_keys, keys_index)
 
+def _entry_event_publish_internal(entry, eventname, params, time, data, event_keys, keys_index):
+  global events_published, events_published_lock
+  
   # If this is a new keys_index, i must merge data with empty keys_index (if present)
   if keys_index != '{}' and eventname in events_published and entry.id in events_published[eventname] and '{}' in events_published[eventname][entry.id] and keys_index not in events_published[eventname][entry.id]:
     for k in events_published[eventname][entry.id]['{}']['params']:
@@ -1478,9 +1489,10 @@ def _entry_event_params_match_condition(eventdata, condition):
   return scripting_js.script_eval(condition, {'params': eventdata['params'], 'changed_params': eventdata['changed_params'], 'keys': eventdata['keys']}, cache = True)
 
 def _entry_event_publish_and_invoke_listeners(entry, eventname, params, time, caller, published_message):
-  # @param caller is "events_passthrough" in case of events_passthrough
+  # @param caller is "events_passthrough" in case of events_passthrough, "group" for event grouping (see events_groups)
   eventdata = _entry_event_publish(entry, eventname, params, time)
-  _entry_event_invoke_listeners(entry, eventdata, caller, published_message)
+  if eventdata:
+    _entry_event_invoke_listeners(entry, eventdata, caller, published_message)
 
 
 
@@ -1641,11 +1653,49 @@ def _subscription_timer_thread():
         if x['no_response_callback'] and 'called' not in x:
           x['no_response_callback'](x['entry'], x['id'], x['message'])
       subscribed_response = [x for x in subscribed_response if x['listeners']]
-
+    
+    events_groups_check()
     sleep(.5)
 
+def events_groups_push(egkey, entry, data, event_keys, keys_index):
+  global events_groups
+  if keys_index in events_groups[egkey]['data'] and data['time'] - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
+    eventdata = _entry_event_publish_internal(entry, data['name'], events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
+    if eventdata:
+      _entry_event_invoke_listeners(entry, eventdata, 'group', None)
+    del events_groups[egkey]['data'][keys_index]
+  if keys_index not in events_groups[egkey]['data']:
+    events_groups[egkey]['data'][keys_index] = {
+      'time': data['time'], 
+      'data': data,
+    }
+  else:
+    for k in data['params']:
+      events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k]
 
-
+def events_groups_check():
+  global events_groups
+  now = mqtt.queueTimems()
+  if now > 0:
+    now = int(now / 1000)
+  else:
+    now = time()
+  for egkey in events_groups:
+    to_delete = []
+    for keys_index in events_groups[egkey]['data']:
+      if now - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
+        d = egkey.find(".")
+        if d > 0:
+          entry = entry_get(egkey[:d])
+          if entry:
+            eventname = egkey[d + 1:]
+            event_keys = entry_event_keys(entry, eventname)
+            eventdata = _entry_event_publish_internal(entry, eventname, events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(events_groups[egkey]['data'][keys_index]['data']['keys']))
+            if eventdata:
+              _entry_event_invoke_listeners(entry, eventdata, 'group', None)
+            to_delete.append(keys_index)
+    for i in to_delete:
+      del events_groups[egkey]['data'][keys_index]
 
 
 ###############################################################################################################################################################
@@ -1661,6 +1711,7 @@ def _entry_events_install(entry):
   """
   Initializes events for entry entry
   """
+  global events_groups
   entry.events = {}
   entry.events_keys = {}
   for topic in entry.definition['publish']:
@@ -1676,6 +1727,18 @@ def _entry_events_install(entry):
           data = entry.definition['publish'][topic]['events'][eventname] if isinstance(entry.definition['publish'][topic]['events'][eventname], list) else [ entry.definition['publish'][topic]['events'][eventname] ]
           for eventparams in data:
             _entry_event_publish(entry, eventname[0:-5], eventparams, -1)
+        elif eventname.endswith(':group') and isinstance(entry.definition['publish'][topic]['events'][eventname], int) and entry.definition['publish'][topic]['events'][eventname] > 0:
+          events_groups[entry.id + '.' + eventname[0:-6]] = { 'group_time': entry.definition['publish'][topic]['events'][eventname], 'data': {}}
+  if 'events' in entry.definition:
+    for eventname in entry.definition['events']:
+      if eventname.endswith(':keys'):
+        entry.events_keys[eventname[0:-5]] = entry.definition['events'][eventname]
+      elif eventname.endswith(':init'):
+        data = entry.definition['events'][eventname] if isinstance(entry.definition['events'][eventname], list) else [ entry.definition['events'][eventname] ]
+        for eventparams in data:
+          _entry_event_publish(entry, eventname[0:-5], eventparams, -1)
+      elif eventname.endswith(':group') and isinstance(entry.definition['events'][eventname], int) and entry.definition['events'][eventname] > 0:
+        events_groups[entry.id + '.' + eventname[0:-6]] = { 'group_time': entry.definition['events'][eventname], 'data': {}}
 
   # events_passthrough translates in event_propagation via on/events definition
   if 'events_passthrough' in entry.definition:
@@ -1715,6 +1778,14 @@ def _entry_actions_install(entry):
           for eventparams in data:
             entry.events['action/' + actionname[0:-5]] = [ '#action' ]
             _entry_event_publish(entry, 'action/' + actionname[0:-5], eventparams, -1)
+  if 'actions' in entry.definition:
+    for actionname in entry.definition['actions']:
+      if actionname.endswith(':init'):
+        data = entry.definition['actions'][actionname] if isinstance(entry.definition['actions'][actionname], list) else [ entry.definition['actions'][actionname] ]
+        for eventparams in data:
+          entry.events['action/' + actionname[0:-5]] = [ '#action' ]
+          _entry_event_publish(entry, 'action/' + actionname[0:-5], eventparams, -1)
+    
 
 def entry_support_event(entry, eventname):
   if hasattr(entry, 'events'):
