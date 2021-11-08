@@ -1697,7 +1697,7 @@ def events_groups_check():
               _entry_event_invoke_listeners(entry, eventdata, 'group', None)
             to_delete.append(keys_index)
     for i in to_delete:
-      del events_groups[egkey]['data'][keys_index]
+      del events_groups[egkey]['data'][i]
 
 
 ###############################################################################################################################################################
