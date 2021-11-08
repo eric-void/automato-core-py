@@ -98,7 +98,7 @@ def boot():
     mqtt.config(config['mqtt'])
 
 def _reset():
-  global all_entries, all_entries_signatures, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, events_groups, index_topic_published, index_topic_subscribed
+  global all_entries, all_entries_signatures, all_nodes, exports, subscriptions, last_entry_and_events_for_received_mqtt_message, events_listeners, events_published, events_published_lock, events_groups, events_groups_lock, index_topic_published, index_topic_subscribed
   all_entries = {}
   all_entries_signatures = {}
   all_nodes = {}
@@ -109,6 +109,7 @@ def _reset():
   events_published = {}
   events_published_lock = threading.Lock()
   events_groups = {}
+  events_groups_lock = threading.Lock()
   index_topic_published = {}
   index_topic_subscribed = {}
   scripting_js.exports = exports
@@ -1660,23 +1661,24 @@ def _subscription_timer_thread():
     sleep(.5)
 
 def events_groups_push(egkey, entry, data, event_keys, keys_index):
-  global events_groups
-  if keys_index in events_groups[egkey]['data'] and data['time'] - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
-    eventdata = _entry_event_publish_internal(entry, data['name'], events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
-    if eventdata:
-      _entry_event_invoke_listeners(entry, eventdata, 'group', None)
-    del events_groups[egkey]['data'][keys_index]
-  if keys_index not in events_groups[egkey]['data']:
-    events_groups[egkey]['data'][keys_index] = {
-      'time': data['time'], 
-      'data': data,
-    }
-  else:
-    for k in data['params']:
-      events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k]
+  global events_groups, events_groups_lock
+  with events_groups_lock:
+    if keys_index in events_groups[egkey]['data'] and data['time'] - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
+      eventdata = _entry_event_publish_internal(entry, data['name'], events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
+      if eventdata:
+        _entry_event_invoke_listeners(entry, eventdata, 'group', None)
+      del events_groups[egkey]['data'][keys_index]
+    if keys_index not in events_groups[egkey]['data']:
+      events_groups[egkey]['data'][keys_index] = {
+        'time': data['time'], 
+        'data': data,
+      }
+    else:
+      for k in data['params']:
+        events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k]
 
 def events_groups_check():
-  global events_groups
+  global events_groups, events_groups_lock
   now = mqtt.queueTimems()
   if now > 0:
     now = int(now / 1000)
@@ -1697,7 +1699,8 @@ def events_groups_check():
               _entry_event_invoke_listeners(entry, eventdata, 'group', None)
             to_delete.append(keys_index)
     for i in to_delete:
-      del events_groups[egkey]['data'][i]
+      with events_groups_lock:
+        del events_groups[egkey]['data'][i]
 
 
 ###############################################################################################################################################################
