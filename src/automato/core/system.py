@@ -1317,13 +1317,17 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
   _current_received_message.message = m
   
   # invoke events listeners
-  _s = _stats_start()
   for pm in m.publishedMessages():
     pm.entry.last_seen = int(timems / 1000)
-    for eventdata in pm.events():
+    _s = _stats_start()
+    events = pm.events()
+    _stats_end('on_mqtt_message.generate_events', _s)
+    _stats_end('on_mqtt_message(' + str(topic) + ').generate_events', _s)
+    _s = _stats_start()
+    for eventdata in events:
       _entry_event_invoke_listeners(pm.entry, eventdata, 'message', pm)
-  _stats_end('on_mqtt_message.invoke_listeners', _s)
-  _stats_end('on_mqtt_message(' + str(topic) + ').invoke_listeners', _s)
+    _stats_end('on_mqtt_message.invoke_elisteners', _s)
+    _stats_end('on_mqtt_message(' + str(topic) + ').invoke_elisteners', _s)
   
   # manage responses callbacks
   _s = _stats_start()
@@ -1884,7 +1888,7 @@ def entry_support_action(entry, actionname):
 def entry_actions_supported(entry):
   return list(entry.actions.keys)
 
-def do_action(actionref, params, reference_entry_id = None, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None):
+def do_action(actionref, params = {}, reference_entry_id = None, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None):
   d = decode_action_reference(actionref, default_entry_id = reference_entry_id)
   return entry_do_action(d['entry'], d['action'], params, d['init'], if_event_not_match = if_event_not_match, if_event_not_match_keys = if_event_not_match_keys, if_event_not_match_timeout = if_event_not_match_timeout) if d else None
 
