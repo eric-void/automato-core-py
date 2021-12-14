@@ -24,6 +24,7 @@ script_eval_cache_hits = 0
 script_eval_cache_miss = 0
 script_eval_cache_disabled = 0
 script_eval_cache_skipped = 0
+script_eval_quick_count = 0
 script_eval_codecontext_signatures = {}
 SCRIPT_EVAL_CACHE_MAXSIZE = 1024
 SCRIPT_EVAL_CACHE_PURGETIME = 3600
@@ -72,10 +73,16 @@ def script_eval(code, context = {}, to_dict = False):
 """
 
 def script_eval(code, context = {}, to_dict = False, cache = False):
+  global script_eval_quick_count
   _s = system._stats_start()
-  ret = _script_eval_int(code, context, cache)
-  if ret and to_dict and isinstance(ret, js2py.base.JsObjectWrapper):
-    ret = ret.to_dict()
+  ret = _script_eval_quick(code, context)
+  if ret and 'return' in ret:
+    script_eval_quick_count = script_eval_quick_count + 1
+    ret = ret['return']
+  else:
+    ret = _script_eval_int(code, context, cache)
+    if ret and to_dict and isinstance(ret, js2py.base.JsObjectWrapper):
+      ret = ret.to_dict()
   system._stats_end('scripting_js.script_eval', _s)
   return ret
 
@@ -227,3 +234,32 @@ def _is_array(v):
 
 def _camel_to_snake_case(v):
   return utils.camel_to_snake_case(_var_to_python(v))
+
+def _parse_float(v):
+  try:
+    return float(v)
+  except ValueError:
+    return None
+
+def _parse_int(v):
+  try:
+    return float(v)
+  except ValueError:
+    return None
+
+def _script_eval_quick(code, context):
+  if code == '({value: payload})':
+    return {'return': {'value': context['payload']}}
+  for k in ['hp', 'day_plugs1', 'night_plugs', 'basement_light', 'basement_plugs', 'external', 'irrigation_pump', 'basement_pump', 'hp_heating', 'hp_dhw', 'other']:
+    if code == "js:('" + k + "' in payload ? {port: '" + k + "', energy: parseFloat(payload['" + k + "']['energy_result']), power: parseInt(payload['" + k + "']['power_last'])} : null)":
+      return {'return': {'port': k, 'energy': _parse_float(context['payload'][k]['energy_result']), 'power': _parse_int(context['payload'][k]['power_last'])} if k in context['payload'] else None }
+  if code == 'js:({power: parseFloat(payload), port: matches[1] ? matches[2] : "0"})':
+    return {'return': { 'power': _parse_float(context['payload']), 'port': context["matches"][2] if context["matches"][1] else "0" }}
+  if code == 'js:({energy: parseFloat(payload) / 60000, energy_reported: parseFloat(payload), port: matches[1] ? matches[2] : "0"})':
+    return {'return': { 'energy': _parse_float(context['payload']) / 60000, 'energy_reported': _parse_float(context['payload']), 'port': context["matches"][2] if context["matches"][1] else "0" }}
+  if code == 'js:({energy: parseFloat(payload) / 1000, energy_reported: parseFloat(payload), port: matches[1] ? matches[2] : "0"})':
+    return {'return': { 'energy': _parse_float(context['payload']) / 1000, 'energy_reported': _parse_float(context['payload']), 'port': context["matches"][2] if context["matches"][1] else "0" }}
+  if code == 'js:({energy_returned: parseFloat(payload) / 1000, energy_returned_reported: parseFloat(payload), port: matches[1] ? matches[2] : "0"})':
+    return {'return': { 'energy_returned': _parse_float(context['payload']) / 1000, 'energy_returned_reported': _parse_float(context['payload']), 'port': context["matches"][2] if context["matches"][1] else "0" }}
+  if code == 'js:payload == "on" ? ({value: 1, port: matches[1]}) : (payload == "off" || payload == "overpower" ? ({value: 0, port: matches[1]}) : false)':
+    return {'return': {'value': 1, 'port': context['matches'][1]} if context['payload'] == 'on' else ({'value': 0, 'port': context['matches'][1]} if context['payload'] == 'off' or context['payload'] == 'overpower' else False)}
