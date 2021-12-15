@@ -7,6 +7,7 @@ import logging
 import js2py
 import threading
 import re
+import json
 
 from automato.core import system
 from automato.core import utils
@@ -24,16 +25,21 @@ script_eval_cache_hits = 0
 script_eval_cache_miss = 0
 script_eval_cache_disabled = 0
 script_eval_cache_skipped = 0
-script_eval_quick_count = 0
 script_eval_codecontext_signatures = {}
 SCRIPT_EVAL_CACHE_MAXSIZE = 1024
 SCRIPT_EVAL_CACHE_PURGETIME = 3600
+
+#script_eval_quick_count = 0
 
 exports = {}
 
 def script_context(context = {}):
   if isinstance(context, js2py.evaljs.EvalJs):
     return context
+    #context = context.__context
+  #if isinstance(context, js2py.base.JsObjectWrapper):
+  #  context = context.to_dict()
+  
   c = js2py.EvalJs({
     'now': system.time(),
     'd': utils.read_duration,
@@ -73,16 +79,19 @@ def script_eval(code, context = {}, to_dict = False):
 """
 
 def script_eval(code, context = {}, to_dict = False, cache = False):
-  global script_eval_quick_count
+  #global script_eval_quick_count
   _s = system._stats_start()
+  """
   ret = _script_eval_quick(code, context)
   if ret and 'return' in ret:
     script_eval_quick_count = script_eval_quick_count + 1
     ret = ret['return']
   else:
-    ret = _script_eval_int(code, context, cache)
-    if ret and to_dict and isinstance(ret, js2py.base.JsObjectWrapper):
-      ret = ret.to_dict()
+  """
+  ret = _script_eval_int(code, context, cache)
+  if ret and to_dict and isinstance(ret, js2py.base.JsObjectWrapper):
+    ret = ret.to_dict()
+
   system._stats_end('scripting_js.script_eval', _s)
   return ret
 
@@ -164,22 +173,13 @@ def _script_eval_int(code, context = {}, cache = False):
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
     code = code[3:]
-  contextjs = script_context(context)
-  _s = system._stats_start()
-  try:
-    ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
-    if cache:
-      with script_eval_cache_lock:
-        script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret }
-    return ret
-  except:
-    cdebug = {}
-    for k in contextjs.__context:
-      cdebug[k] = contextjs[k]
-    logging.exception('scripting_js> error evaluating js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (context.__context + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
-  finally:
-    system._stats_end('scripting_js.script_eval(js2py)', _s)
 
+  ret = _script_exec_js(code, context, do_eval = True)
+  if cache and not ret['error']:
+    with script_eval_cache_lock:
+      script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret['return'] }
+  return ret['return'] if 'return' in ret else None
+  
 def _script_code_uses_full_var(code, var):
   """
   Return if code uses the var, without dict key reference ("payload[x]" or "x in payload" uses key reference, "payload" not)
@@ -191,19 +191,61 @@ def _script_code_uses_full_var(code, var):
       return True
   return False
 
-def script_exec(code, context = {}, to_dict = False):
+def script_exec(code, context = {}):
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
     code = code[3:]
-  _s = system._stats_start()
+  _script_exec_js(code, context, do_eval = False)
+
+
+script_js_compiled = {}
+script_js_compiled_lock = threading.Lock()
+script_js_compiled_hits = 0
+script_js_compiled_miss = 0
+SCRIPT_JS_COMPILED_MAXSIZE = 1000
+SCRIPT_JS_COMPILED_PURGETIME = 3600
+
+def _script_exec_js(code, context = {}, do_eval = True):
+  global script_js_compiled, script_js_compiled_hits, script_js_compiled_miss, script_js_compiled_lock
+  
   contextjs = script_context(context)
+  _s = system._stats_start()
   try:
-    return contextjs.execute(code, use_compilation_plan = js2py_use_compilation_plan)
-  except:
-    logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\n'.format(code = code, context = context))
-  finally:
-    system._stats_end('scripting_js.script_exec', _s)
+    #ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
+    # @see https://github.com/PiotrDabkowski/Js2Py/blob/b16d7ce90ac9c03358010c1599c3e87698c9993f/js2py/evaljs.py#L174 (execute method)
     
+    keyhash = utils.md5_hexdigest(code)
+    if keyhash in script_js_compiled:
+      script_js_compiled_hits += 1
+    else:
+      script_js_compiled_miss += 1
+      
+      if len(script_js_compiled) > SCRIPT_JS_COMPILED_MAXSIZE:
+        with script_js_compiled_lock:
+          t = SCRIPT_JS_COMPILED_PURGETIME
+          while len(script_js_compiled) > SCRIPT_JS_COMPILED_MAXSIZE * 0.9:
+            script_js_compiled = {x:script_js_compiled[x] for x in script_js_compiled if script_js_compiled[x]['used'] > system.time() - t}
+            t = t / 2 if t > 1 else -1
+            
+      if do_eval:
+        code = 'PyJsEvalResult = eval(%s)' % json.dumps(code)
+      code = js2py.translators.translate_js(code, '', use_compilation_plan=js2py_use_compilation_plan)
+      script_js_compiled[keyhash] = {'compiled': compile(code, '<EvalJS snippet>', 'exec')}
+      
+    script_js_compiled[keyhash]['used'] = system.time()
+    exec(script_js_compiled[keyhash]['compiled'], contextjs._context)
+    #exec(code, contextjs._context)
+    
+    ret = _var_to_python(contextjs['PyJsEvalResult']) if do_eval else None
+    return {'return': ret, 'error': False}
+  except:
+    cdebug = {}
+    for k in contextjs.__context:
+      cdebug[k] = contextjs[k]
+    logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (str(context.__context) + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
+    return {'error': True}
+  finally:
+    system._stats_end('scripting_js.script_' + ('eval' if do_eval else 'exec')+ '(js2py)', _s)
 
 def _var_to_python(v):
   if isinstance(v, js2py.base.PyJs):
@@ -247,6 +289,7 @@ def _parse_int(v):
   except ValueError:
     return None
 
+"""
 def _script_eval_quick(code, context):
   if code == '({value: payload})':
     return {'return': {'value': context['payload']}}
@@ -263,3 +306,4 @@ def _script_eval_quick(code, context):
     return {'return': { 'energy_returned': _parse_float(context['payload']) / 1000, 'energy_returned_reported': _parse_float(context['payload']), 'port': context["matches"][2] if context["matches"][1] else "0" }}
   if code == 'js:payload == "on" ? ({value: 1, port: matches[1]}) : (payload == "off" || payload == "overpower" ? ({value: 0, port: matches[1]}) : false)':
     return {'return': {'value': 1, 'port': context['matches'][1]} if context['payload'] == 'on' else ({'value': 0, 'port': context['matches'][1]} if context['payload'] == 'off' or context['payload'] == 'overpower' else False)}
+"""
