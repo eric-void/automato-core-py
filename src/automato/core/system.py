@@ -650,9 +650,8 @@ def _on_events_passthrough_listener(source_entry, eventname, eventdata, caller, 
     for k in eventdata['keys']:
       del params[k]
   if 'init' in passthrough_conf:
-    context = scripting_js.script_context({ 'params': params })
-    scripting_js.script_exec(passthrough_conf['init'], context)
-  _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, params, eventdata['time'], 'events_passthrough', published_message)
+    exec_context = scripting_js.script_exec(passthrough_conf['init'], { 'params': params })
+  _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, exec_context['params'] if 'init' in passthrough_conf else params, eventdata['time'], 'events_passthrough', published_message)
 
 """
 Extract the exportable portion [L.0]+[L.0N] of the full entry definition
@@ -1918,22 +1917,20 @@ def entry_do_action(entry_or_id, action, params = {}, init = None, if_event_not_
           return True
   
     publish = None
-    action_full_params = None
+    exec_context = { 'params': params }
     for topic in entry.actions[action]:
       actiondef = entry.definition['subscribe'][topic]['actions'][action]
       if isinstance(actiondef, str):
         actiondef = { 'payload': actiondef }
       if actiondef['payload']:
-        context = scripting_js.script_context({ 'params': params })
         if 'init' in actiondef and actiondef['init']:
-          scripting_js.script_exec(actiondef['init'], context)
+          exec_context = scripting_js.script_exec(actiondef['init'], exec_context)
         if init:
-          scripting_js.script_exec(init, context)
-        action_full_params = context.params
-        payload = scripting_js.script_eval(actiondef['payload'], context, to_dict = True)
+          exec_context = scripting_js.script_exec(init, exec_context)
+        payload = scripting_js.script_eval(actiondef['payload'], exec_context, to_dict = True)
         if payload != None:
           if 'topic' in actiondef and actiondef['topic']:
-            topic = scripting_js.script_eval(actiondef['topic'], context, to_dict = True)
+            topic = scripting_js.script_eval(actiondef['topic'], exec_context, to_dict = True)
           publish = [topic, payload]
           break
       else:
@@ -1942,7 +1939,7 @@ def entry_do_action(entry_or_id, action, params = {}, init = None, if_event_not_
 
     if publish:
       entry.publish(publish[0], publish[1])
-      event_get_invalidate_on_action(entry, action, action_full_params, if_event_not_match)
+      event_get_invalidate_on_action(entry, action, exec_context['params'], if_event_not_match)
       return True
 
   return False
@@ -2093,7 +2090,7 @@ def transform_action_reference_to_event_reference(actionref, return_decoded = Fa
   """
   Transform an action reference to a valid event reference.
   Delete the "-set" postfix to action name and replace "=" with "==" and ";" with "&&" in init code
-  Example: "js: action-set(js: params['x'] = 1; params['y'] = 2;" > "js: action(js: params['x'] == 1 && params['y'] == 2)"
+  Example: "js: action-set(js: params['x'] = 1; params['y'] = 2;)" > "js: action(js: params['x'] == 1 && params['y'] == 2)"
   """
   d = decode_action_reference(actionref, no_action = True) if not isinstance(actionref, dict) else actionref
   if not d:
@@ -2108,7 +2105,7 @@ def transform_event_reference_to_action_reference(eventref, return_decoded = Fal
   """
   Transform an event reference to a valid action reference.
   Add the "-set" postfix to event name and replace "==" with "=" and "&&" with ";" in condition
-  Example: "js: event(js: params['x'] == 1 && params['y'] == 2)" > "js: event-set(js: params['x'] = 1; params['y'] = 2;"
+  Example: "js: event(js: params['x'] == 1 && params['y'] == 2)" > "js: event-set(js: params['x'] = 1; params['y'] = 2;)"
   """
   d = decode_event_reference(eventref, no_event = True) if not isinstance(eventref, dict) else eventref
   if not d:

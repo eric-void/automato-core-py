@@ -52,7 +52,7 @@ def test_init():
           },
           "@/pub2": {
             "type": "int",
-            "payload_transform": "js:payload['x'] = payload['x'] + 'transformed'; payload",
+            "payload_transform": "jsf: payload['x'] = payload['x'] + 'transformed'; return payload",
             "notify": "{caption} published pub2={payload[x]}",
             "events": {
               "test_event": "js:({ port: payload['x'] + '1' })",

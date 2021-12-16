@@ -13,7 +13,7 @@ from automato.core import system
 from automato.core import utils
 
 # WARN: Un eval di questo tipo: "js: false ? do() : null" eseguirà "do()" comunque (anche se poi il valore di ritorno non verrà preso come return della funziona). Tenere in considerazione la cosa.
-# Si evita facendo: "js: if (false) r = do(); r"
+# Si evita facendo: "jsf: if (false) r = do(); return r"
 
 # Enable "use_compilation_plan", an undocumented feature (20190626: NOT WORKING)
 # @see https://github.com/PiotrDabkowski/Js2Py/blob/master/js2py/evaljs.py - https://github.com/PiotrDabkowski/Js2Py/blob/master/js2py/translators/translator.py
@@ -28,55 +28,64 @@ script_eval_cache_skipped = 0
 script_eval_codecontext_signatures = {}
 SCRIPT_EVAL_CACHE_MAXSIZE = 1024
 SCRIPT_EVAL_CACHE_PURGETIME = 3600
+script_context_instance = None
+script_context_instance_context_keys = None
+script_context_instance_exports_keys = None
+script_context_instance_lock = threading.Lock()
+script_js_compiled = {}
+script_js_compiled_lock = threading.Lock()
+script_js_compiled_hits = 0
+script_js_compiled_miss = 0
+SCRIPT_JS_COMPILED_MAXSIZE = 1000
+SCRIPT_JS_COMPILED_PURGETIME = 3600
 
 #script_eval_quick_count = 0
 
 exports = {}
 
 def script_context(context = {}):
-  if isinstance(context, js2py.evaljs.EvalJs):
-    return context
-    #context = context.__context
-  #if isinstance(context, js2py.base.JsObjectWrapper):
-  #  context = context.to_dict()
-  
-  c = js2py.EvalJs({
-    'now': system.time(),
-    'd': utils.read_duration,
-    't': _parse_datetime,
-    'strftime': _strftime,
-    'array_sum': utils.array_sum,
-    'array_avg': utils.array_avg,
-    'array_min': utils.array_min,
-    'array_max': utils.array_max,
-    'round': round,
-    'is_dict': _is_dict,
-    'is_array': _is_array,
-    'print': _print,
-    'str': str,
-    'camel_to_snake_case': _camel_to_snake_case,
-    '_': _translate,
-    
-    ** exports,
-    ** context
-  })
-  c.__context = context
-  return c
+  global script_context_instance, script_context_instance_context_keys, script_context_instance_exports_keys
+  if not script_context_instance or script_context_instance_exports_keys != list(exports.keys()):
+    script_context_instance = js2py.EvalJs({
+      'now': system.time(),
+      'd': utils.read_duration,
+      't': _parse_datetime,
+      'strftime': _strftime,
+      'array_sum': utils.array_sum,
+      'array_avg': utils.array_avg,
+      'array_min': utils.array_min,
+      'array_max': utils.array_max,
+      'round': round,
+      'is_dict': _is_dict,
+      'is_array': _is_array,
+      'print': _print,
+      'str': str,
+      'camel_to_snake_case': _camel_to_snake_case,
+      '_': _translate,
+      
+      ** exports,
+    })
+    script_context_instance.__context = None
+    script_context_instance_context_keys = None
+    script_context_instance_exports_keys = list(exports.keys())
 
-"""
-def script_eval(code, context = {}, to_dict = False):
-  # TODO Supporto per altri linguaggi
-  if code.startswith('js:'):
-    code = code[3:]
-  contextjs = script_context(context)
-  try:
-    ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
-    if to_dict and ret and isinstance(ret, js2py.base.JsObjectWrapper):
-      ret = ret.to_dict()
-    return ret
-  except:
-    logging.exception('error evaluating js script: \n' + code + '\n context: ' + str(context) + '\n')
-"""
+  if isinstance(context, js2py.evaljs.EvalJs):
+    context = context.__context
+  if isinstance(context, js2py.base.JsObjectWrapper):
+    context = context.to_dict()
+  if script_context_instance_context_keys:
+    for k in script_context_instance_context_keys:
+      if k not in context:
+        script_context_instance._context['var'][k] = None
+  for k in context:
+    script_context_instance._context['var'][k] = context[k]
+
+  script_context_instance.__context = context
+  script_context_instance_context_keys = list(context.keys())
+  
+  script_context_instance._context['var']['now'] = system.time()
+
+  return script_context_instance
 
 def script_eval(code, context = {}, to_dict = False, cache = False):
   #global script_eval_quick_count
@@ -172,9 +181,12 @@ def _script_eval_int(code, context = {}, cache = False):
   
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
-    code = code[3:]
-
-  ret = _script_exec_js(code, context, do_eval = True)
+    ret = _script_exec_js(code[3:], context, do_eval = True)
+  elif code.startswith('jsf:'):
+    ret = _script_exec_js(code[4:], context, do_eval = True, do_eval_function = True)
+  else:
+    ret = _script_exec_js(code, context, do_eval = True)
+    
   if cache and not ret['error']:
     with script_eval_cache_lock:
       script_eval_cache[keyhash] = { 'key': key, 'used': system.time(), 'result': ret['return'] }
@@ -191,29 +203,27 @@ def _script_code_uses_full_var(code, var):
       return True
   return False
 
-def script_exec(code, context = {}):
+def script_exec(code, context = {}, return_context = True):
+  """
+  @param return_context Used to access modified context variables (context passed could be NOT modified by script). Use True to return all context variables, ['name', ...] to return only variables referenced, False to return no variables
+  @return modified context variables if return_context set
+  """
   # TODO Supporto per altri linguaggi
   if code.startswith('js:'):
     code = code[3:]
-  _script_exec_js(code, context, do_eval = False)
+  ret = _script_exec_js(code, context, do_eval = False, return_context = return_context)
+  return ret['context'] if not ret['error'] else None
 
-
-script_js_compiled = {}
-script_js_compiled_lock = threading.Lock()
-script_js_compiled_hits = 0
-script_js_compiled_miss = 0
-SCRIPT_JS_COMPILED_MAXSIZE = 1000
-SCRIPT_JS_COMPILED_PURGETIME = 3600
-
-def _script_exec_js(code, context = {}, do_eval = True):
-  global script_js_compiled, script_js_compiled_hits, script_js_compiled_miss, script_js_compiled_lock
+def _script_exec_js(code, context = {}, do_eval = True, do_eval_function = False, return_context = False):
+  """
+  @param return_context Used to access modified context variables (context passed could be NOT modified by script). Use True to return all context variables, ['name', ...] to return only variables referenced, False to return no variables
+  @return { 'error': boolean, 'return': evalued expression if do_eval = True, 'context': modificed context variables if return_context set }
+  """
+  # @see https://github.com/PiotrDabkowski/Js2Py/blob/b16d7ce90ac9c03358010c1599c3e87698c9993f/js2py/evaljs.py#L174 (execute method)
+  global script_js_compiled, script_js_compiled_hits, script_js_compiled_miss, script_js_compiled_lock, script_context_instance_lock
   
-  contextjs = script_context(context)
   _s = system._stats_start()
   try:
-    #ret = _var_to_python(contextjs.eval(code, use_compilation_plan = js2py_use_compilation_plan))
-    # @see https://github.com/PiotrDabkowski/Js2Py/blob/b16d7ce90ac9c03358010c1599c3e87698c9993f/js2py/evaljs.py#L174 (execute method)
-    
     keyhash = utils.md5_hexdigest(code)
     if keyhash in script_js_compiled:
       script_js_compiled_hits += 1
@@ -228,22 +238,38 @@ def _script_exec_js(code, context = {}, do_eval = True):
             t = t / 2 if t > 1 else -1
             
       if do_eval:
-        code = 'PyJsEvalResult = eval(%s)' % json.dumps(code)
+        #code = 'PyJsEvalResult = eval(%s)' % json.dumps(code) # Metodo originale usato da js2py, molto lento
+        if not do_eval_function:
+          code = 'PyJsEvalResult = ' + code
+        else:
+          code = 'PyJsEvalResult = function() {' + code + '}()'
+
       code = js2py.translators.translate_js(code, '', use_compilation_plan=js2py_use_compilation_plan)
-      script_js_compiled[keyhash] = {'compiled': compile(code, '<EvalJS snippet>', 'exec')}
       
-    script_js_compiled[keyhash]['used'] = system.time()
-    exec(script_js_compiled[keyhash]['compiled'], contextjs._context)
-    #exec(code, contextjs._context)
+      script_js_compiled[keyhash] = {'compiled': compile(code, '<EvalJS snippet>', 'exec')}
     
-    ret = _var_to_python(contextjs['PyJsEvalResult']) if do_eval else None
-    return {'return': ret, 'error': False}
+    script_js_compiled[keyhash]['used'] = system.time()
+    
+    ret = {'error': False, 'return': None, 'context': {}}
+    with script_context_instance_lock:
+      contextjs = script_context(context)
+      exec(script_js_compiled[keyhash]['compiled'], contextjs._context)
+      if do_eval:
+        ret['return'] = _var_to_python(contextjs['PyJsEvalResult'])
+      if return_context:
+        for k in return_context if isinstance(return_context, list) else ((context.__context.to_dict() if isinstance(context.__context, js2py.base.JsObjectWrapper) else context.__context) if isinstance(context, js2py.evaljs.EvalJs) else (context.to_dict() if isinstance(context, js2py.base.JsObjectWrapper) else context)).keys():
+          ret['context'][k] = contextjs[k]
+
+    return ret
   except:
+    """
     cdebug = {}
     for k in contextjs.__context:
       cdebug[k] = contextjs[k]
     logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\ncontextjs: {contextjs}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (str(context.__context) + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)')), contextjs = cdebug))
-    return {'error': True}
+    """
+    logging.exception('scripting_js> error executing js script: {code}\ncontext: {context}\n'.format(code = code, context = str(context if not isinstance(context, js2py.evaljs.EvalJs) else (str(context.__context) + ' (WARN! this is the source context, but changes could have been made before this call, because a result of another call has been passed!)'))))
+    return {'error': True, 'return': None, 'context': {}}
   finally:
     system._stats_end('scripting_js.script_' + ('eval' if do_eval else 'exec')+ '(js2py)', _s)
 
