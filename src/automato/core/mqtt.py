@@ -166,7 +166,7 @@ def _mqtt_communication_thread():
     if system.time() > connected_since + 300 and delay > settings['warning_slow_queue_ms']:
       logging.warning("Slow mqtt_communication_queue, last message fetched in {ms} ms: {msg}".format(ms = delay, msg = d))
     if mqtt_communication_recent_delay > 0 and mqtt_communication_recent_delay_timems < timems - 60000:
-      mqtt_communication_recent_delay = mqtt_communication_recent_delay / pow(2, (timems - mqtt_communication_recent_delay_timems) / 1000)
+      mqtt_communication_recent_delay = mqtt_communication_recent_delay / pow(2, (timems - mqtt_communication_recent_delay_timems) / 1000) if timems - mqtt_communication_recent_delay_timems < 3600000 else 0
       if mqtt_communication_recent_delay < 1000:
         mqtt_communication_recent_delay = 0
       mqtt_communication_recent_delay_timems = timems if mqtt_communication_recent_delay > 0 else 0
