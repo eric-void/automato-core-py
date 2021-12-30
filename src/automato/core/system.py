@@ -353,6 +353,7 @@ class Entry(object):
     self.type = self.definition['type']
     self.created = time()
     self.last_seen = 0
+    self.publish_last_seen = {}
     self.exports = exports
     self.topic_rule_aliases = {}
     self.topic = entry_topic_lambda(self)
@@ -609,11 +610,16 @@ def _entry_definition_normalize_after_load(entry):
         if k not in entry.definition['publish'][topic_rule]:
           entry.definition['publish'][topic_rule][k] = entry.definition[k]
 
+  if 'ignore_interval' in entry.definition:
+    entry.definition['ignore_interval'] = utils.read_duration(entry.definition['ignore_interval'])
+
   if 'publish' in entry.definition:
     res = {}
     for topic_rule in entry.definition['publish']:
       if 'topic' in entry.definition['publish'][topic_rule]:
         entry.topic_rule_aliases[topic_rule] = entry.topic(entry.definition['publish'][topic_rule]['topic'])
+      if 'ignore_interval' in entry.definition['publish'][topic_rule]:
+        entry.definition['publish'][topic_rule]['ignore_interval'] = utils.read_duration(entry.definition['publish'][topic_rule]['ignore_interval'])
       res[entry.topic(topic_rule)] = entry.definition['publish'][topic_rule]
     entry.definition['publish'] = res
 
@@ -1182,7 +1188,23 @@ class Message(object):
       _s = _stats_start()
       self._publishedMessages = []
       for entry_id in entries:
-        self._publishedMessages.append(PublishedMessage(self, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] if entries[entry_id]['matches'] != [True] else []))
+        ignored = False
+        if "ignore" in entries[entry_id]['entry'].definition:
+          ignored = entries[entry_id]['entry'].definition["ignore"]
+        if not ignored and "ignore" in entries[entry_id]['definition']:
+          ignored = entries[entry_id]['definition']["ignore"]
+        if not ignored:
+          ignore_interval = 0
+          if "ignore_interval" in entries[entry_id]['entry'].definition:
+            ignore_interval = entries[entry_id]['entry'].definition["ignore_interval"]
+          if "ignore_interval" in entries[entry_id]['definition']:
+            ignore_interval = entries[entry_id]['definition']["ignore_interval"]
+          if ignore_interval > 0 and self.topic in entries[entry_id]['entry'].publish_last_seen and (timems() / 1000) - entries[entry_id]['entry'].publish_last_seen[self.topic] < ignore_interval - 1:
+            ignored = True
+        if not ignored:
+          self._publishedMessages.append(PublishedMessage(self, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] if entries[entry_id]['matches'] != [True] else []))
+        #else:
+        #  logging.debug("SYSTEM> Ignored publishedmessage {entry_id}.{topic_rule} ({topic})".format(entry_id = entry_id, topic_rule = entries[entry_id]['topic'], topic = self.topic))
       _stats_end('Message.publishedMessages().create', _s)
       _stats_end('Message(' + self.topic + ').publishedMessages().create', _s)
 
@@ -1260,10 +1282,14 @@ class PublishedMessage(object):
           if ":" not in eventname:
             eventdefs = self.definition['events'][eventname] if isinstance(self.definition['events'][eventname], list) else [ self.definition['events'][eventname] ]
             for eventdef in eventdefs:
-              if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname] or self.entry.id_local in events_listeners[eventname])):
+              if ('listen_all_events' in config and config['listen_all_events']) or (eventname in events_listeners and ("*" in events_listeners[eventname] or self.entry.id in events_listeners[eventname] or self.entry.id_local in events_listeners[eventname])) or ('events_debug' in self.definition and self.definition['events_debug']):
                 _s = _stats_start()
                 event = _entry_event_process(self.entry, eventname, eventdef, self)
                 _stats_end('PublishedMessages.event_process', _s)
+                if 'events_debug' in self.definition and self.definition['events_debug']:
+                  logging.debug("{id}> EVENT_DEBUG> {topic}={payload} -> {eventname}:{event}".format(id = self.entry.id, topic = self.topic, payload = self.payload, eventname = eventname, event = event))
+                  if self.definition['events_debug'] >= 2:
+                    event = False
                 if event:
                   _s = _stats_start()
                   eventdata = _entry_event_publish(self.entry, event['name'], event['params'], time() if not self.message.retain else 0)
@@ -1320,6 +1346,7 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
   # invoke events listeners
   for pm in m.publishedMessages():
     pm.entry.last_seen = int(timems / 1000)
+    pm.entry.publish_last_seen[topic] = int(timems / 1000)
     _s = _stats_start()
     events = pm.events()
     _stats_end('on_mqtt_message.generate_events', _s)
@@ -1691,18 +1718,19 @@ def events_groups_check():
     now = time()
   for egkey in events_groups:
     to_delete = []
-    for keys_index in events_groups[egkey]['data']:
-      if now - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
-        d = egkey.find(".")
-        if d > 0:
-          entry = entry_get(egkey[:d])
-          if entry:
-            eventname = egkey[d + 1:]
-            event_keys = entry_event_keys(entry, eventname)
-            eventdata = _entry_event_publish_internal(entry, eventname, events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(events_groups[egkey]['data'][keys_index]['data']['keys']))
-            if eventdata:
-              _entry_event_invoke_listeners(entry, eventdata, 'group', None)
-            to_delete.append(keys_index)
+    with events_groups_lock:
+      for keys_index in events_groups[egkey]['data']:
+        if now - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
+          d = egkey.find(".")
+          if d > 0:
+            entry = entry_get(egkey[:d])
+            if entry:
+              eventname = egkey[d + 1:]
+              event_keys = entry_event_keys(entry, eventname)
+              eventdata = _entry_event_publish_internal(entry, eventname, events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(events_groups[egkey]['data'][keys_index]['data']['keys']))
+              if eventdata:
+                _entry_event_invoke_listeners(entry, eventdata, 'group', None)
+              to_delete.append(keys_index)
     for i in to_delete:
       with events_groups_lock:
         del events_groups[egkey]['data'][i]
