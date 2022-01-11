@@ -62,6 +62,7 @@ def script_context(context = {}):
       'print': _print,
       'str': str,
       'camel_to_snake_case': _camel_to_snake_case,
+      'payload_transfer': _payload_transfer,
       '_': _translate,
       
       ** exports,
@@ -108,6 +109,8 @@ def script_eval(code, context = {}, to_dict = False, cache = False):
 
 def _script_eval_int(code, context = {}, cache = False):
   global script_eval_cache, script_eval_cache_lock, script_eval_cache_hits, script_eval_cache_miss, script_eval_cache_skipped, script_eval_cache_disabled, script_eval_codecontext_signatures
+  
+  cache = False
 
   # TODO UNSUPPORTED: If context is the result of another exec/eval call, i must extract the real context from it. I'm skipping it right now
   # NOTE FUTURE: context._var._obj.own è un oggetto di tipo Scope (vedi https://github.com/PiotrDabkowski/Js2Py/blob/master/js2py/base.py#L1066) che contiene TUTTO l'ambiente js (quindi le variabili di context, ma anche tutto il resto)
@@ -278,6 +281,8 @@ def _script_exec_js(code, context = {}, do_eval = True, do_eval_function = False
 def _var_to_python(v):
   if isinstance(v, js2py.base.PyJs):
     v = v.to_python()
+  if isinstance(v, js2py.base.JsObjectWrapper):
+    v = v.to_dict()
   return v
   
 def _parse_datetime(v):
@@ -316,6 +321,21 @@ def _parse_int(v):
     return float(v)
   except ValueError:
     return None
+
+def _payload_transfer(base_result, payload, keys, empty_result = None):
+  base_result = _var_to_python(base_result)
+  payload = _var_to_python(payload)
+  keys = _var_to_python(keys)
+  result = {}
+  if isinstance(keys, list):
+    for k in keys:
+      if k in payload:
+        result[k] = payload[k]
+  elif isinstance(keys, dict):
+    for k in keys:
+      if k in payload:
+        result[keys[k] if keys[k] else k] = payload[k]
+  return {** base_result, ** result} if result else empty_result
 
 """
 def _script_eval_quick(code, context):

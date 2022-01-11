@@ -48,6 +48,7 @@ def init(lsettings = None):
     'publish_before_connection_policy': 'connect', # connect, queue, error
     'message-logger': '',
     'warning_slow_queue_ms': 5000,
+    'topic_filter_ignore': [], # A list of topic patterns (mqtt syntax or /regexp/)
     # all: True,
     # check_broken_connection: 5, # Number of seconds that a message published should be self-received. If not, the connection is considered broken and a reconnect attempt will be made. Use only with "all" = True
   };
@@ -180,7 +181,7 @@ def _mqtt_communication_thread():
     elif d['type'] == 'subscribe':
       try:
         decoded = _decodePayload(d['payload'])
-        logging.getLogger(settings["message-logger"]).info('received message{retained} {topic} = {payload}{delay}'.format(topic = d['topic'], payload = d['payload'], retained = ' (retained)' if d['retain'] else '', delay = ' (' + str(delay) + 'ms delay)' if delay > 0 else ''))
+        logging.getLogger(settings["message-logger"]).info('received message{retained} {topic} = {payload}{delay}'.format(topic = d['topic'], payload = d['payload'], retained = ' (retained)' if d['retain'] else '', delay = ' (' + str(delay) + 'ms delay, size: ' + str(mqtt_communication_queue.qsize()) + ')' if delay > 0 else ''))
         if "cache" in settings and settings['cache']:
           cache[d['topic']] = decoded
         if "subscribe" in settings:
@@ -215,6 +216,13 @@ def _mqtt_communication_publish(topic, payload, qos, retain):
 def _onMessage(client, userdata, msg):
   global connected, mqtt_communication_queue
   #logging.debug("QUEUE PUT: " + str({'type': 'subscribe', 'topic': msg.topic, 'payload': msg.payload, 'retain': msg.retain, 'qos': msg.qos}))
+  
+  if settings['topic_filter_ignore']:
+    for f in settings['topic_filter_ignore']:
+      if topicMatches(msg.topic, f):
+        logging.getLogger(settings["message-logger"]).info('ignored message{retained} {topic} = {payload}'.format(topic = msg.topic, payload = msg.payload, retained = ' (retained)' if msg.retain else ''))
+        return
+  
   mqtt_communication_queue.put({'type': 'subscribe', 'topic': msg.topic, 'payload': msg.payload, 'retain': msg.retain, 'qos': msg.qos, 'timems': system.timems()})
   if connected < 3:
     connected = 3
