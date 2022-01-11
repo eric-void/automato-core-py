@@ -46,6 +46,7 @@ exports = {}
 def script_context(context = {}):
   global script_context_instance, script_context_instance_context_keys, script_context_instance_exports_keys
   if not script_context_instance or script_context_instance_exports_keys != list(exports.keys()):
+    logging.debug("scripting> Inizializing new script context")
     script_context_instance = js2py.EvalJs({
       'now': system.time(),
       'd': utils.read_duration,
@@ -65,6 +66,7 @@ def script_context(context = {}):
       
       ** exports,
     })
+    
     script_context_instance.__context = None
     script_context_instance_context_keys = None
     script_context_instance_exports_keys = list(exports.keys())
