@@ -60,7 +60,7 @@ def dict_merge(dct, merge_dct, join_lists_depth = 0, add_keys = True):
   Returns:
     dict: updated dict
   """
-  if isinstance(dct, dict) and isinstance(merge_dct, collections.Mapping):
+  if isinstance(dct, dict) and isinstance(merge_dct, collections.abc.Mapping):
     dct = dct.copy()
     if not add_keys:
       merge_dct = {
