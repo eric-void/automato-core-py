@@ -1651,7 +1651,6 @@ def _subscribed_response_on_message(message):
   for x in subscribed_response:
     for l in x['listeners']:
       if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count']):
-        #TODO Gestire una cache di qualche tipo (qui ho bisogno solo di sapere che c'è il match, quindi basterebbe una cache di topic_matches)
         matches = topic_matches(l['topic_rule'], message.topic, message.payload)
         if matches['matched']:
           l['count'] = l['count'] + 1
