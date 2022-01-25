@@ -3,6 +3,7 @@
 
 from automato.core import test
 from automato.core import system
+# optional: from automato.node import node_system
 
 def test_init():
   test.add_node_config({
@@ -51,7 +52,7 @@ def test_run(entries):
 
   # Do an action on a specific entry
   test.assertAction('s6', 'entry_b', 'test_action', { 'value': '1' }, init = 'js:params["val2"] = "0"', 
-    assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}} # To check for events you MUST specify an events topic
+    assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}} # To check for events you should specify an events topic (if NOT, it will check on all events emitted)
     assertSubscribe = {'subs/entry_b': 'test10', 'subs/entry_b/response': 'ok'},
     assertChild = ['entry_b_on_subscribed_message', 'entry_b_publish', 'entry_b_on_events_passthrough'], 
   )
@@ -62,6 +63,7 @@ def test_run(entries):
     waitPublish = {'topic1': 'payload1:', ...}, # Do some "waitPublish" commands before the rest of the start starts
     assertSubscribe = {'device/test-rf-1/detected': ''}, assertEventsTopic = 'device/test-rf-1/detected', assertEvents = {'detected': {}, 'input': {'value': 1, 'temporary': 1}}, wait = False)
   # ... DO SOMETHING
+  # ... example: node_system.run_step()
   test.waitRunning()
   
   # Generic eq assert
@@ -72,6 +74,9 @@ def test_run(entries):
   
   # To make a direct call to a module handler
   entries['name@TEST'].module.callback(...)
+  
+  # To change an instance config
+  entries['name@TEST'].config['...'] = '...'
   
   # Move ahead clock time by that number of seconds
   system.time_offset(5)
