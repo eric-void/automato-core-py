@@ -246,7 +246,7 @@ def on_all_mqtt_messages(message):
   
   delete = []
   for check in checks:
-    if 'topic' in check and check['topic'] == message.topic:
+    if 'topic' in check and (check['topic'] == message.topic or (check['topic'] == None and ('events' in check or 'some_events' in check))):
       unitname = check['unit'] + '.' + check['name'] if check['unit'] else False
       if not unitname and (check['payload'] == message.payload or (check['payload'] == None and message.payload == "")):
         delete.append(check)
