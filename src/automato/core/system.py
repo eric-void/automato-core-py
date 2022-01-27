@@ -655,6 +655,7 @@ def _on_events_passthrough_listener(source_entry, eventname, eventdata, caller, 
   if passthrough_conf['remove_keys'] and ('keys' in eventdata):
     for k in eventdata['keys']:
       del params[k]
+  exec_context = None
   if 'init' in passthrough_conf:
     exec_context = scripting_js.script_exec(passthrough_conf['init'], { 'params': params })
   _entry_event_publish_and_invoke_listeners(dest_entry, passthrough_conf["rename"] if "rename" in passthrough_conf and passthrough_conf["rename"] else eventname, exec_context['params'] if 'init' in passthrough_conf else params, eventdata['time'], 'events_passthrough', published_message)
