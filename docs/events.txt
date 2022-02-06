@@ -33,6 +33,8 @@ Events/actions:
 - netspeed: {"download": int, "download:unit": "bps", "upload": int, "upload:unit": "bps", "ping": float, "ping:unit": "ms", "error": string}
 - bandwidth: come sopra ma per la rete usata
 - water-leak: { value: [int] } # Inserito anche input con channel = "water-leak"
+- vibration: { value: [int], temporary: true } # in genere quando value = 1 => temporary = true (se value = 0 invece si intende stato stabile senza temporary)
+- tamper: { value: [int] }
 
 - battery: { value: int } # value 0..100
 
