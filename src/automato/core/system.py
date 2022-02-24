@@ -1653,6 +1653,7 @@ def _subscribed_response_on_message(message):
     for l in x['listeners']:
       if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count']):
         matches = topic_matches(l['topic_rule'], message.topic, message.payload)
+          
         if matches['matched']:
           l['count'] = l['count'] + 1
           final = False if [m['count'] for m in x['listeners'] if m['count'] == 0 and m['max_count'] > 0] else True
@@ -1671,15 +1672,16 @@ def _subscription_timer_thread():
   while not destroyed:
     now = timems()
     delay = round(mqtt.queueDelay() / 1000 + 0.49) * 1000
-    # If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be normal a slowly processing of messages. So we add some more delay (20%).
+    # If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be a normal slowly processing of messages. So we add some more delay (20%).
     delay = delay * 1.2
     
     for x in subscribed_response:
       if [l for l in x['listeners'] if l['expiry'] + delay <= now]:
         # TODO DEBUG REMOVE
-        for l in x['listeners']:
-          if l['expiry'] + delay <= now:
-            logging.debug('SYSTEM> Detected timeout in response checkout for entry #{id}, message {topic}={payload}, check: expiry {expiry} + delay {delay} <= now {now}'.format(id = x['entry'].id, topic = x['message'].topic, payload = x['message'].payload, expiry = l['expiry'], delay = delay, now = now))
+        if 'called' not in x:
+          for l in x['listeners']:
+            if l['expiry'] + delay <= now:
+              logging.debug('SYSTEM> Detected timeout in response checkout for entry #{id}, message {topic}={payload}, check: expiry {expiry} + delay {delay} <= now {now}'.format(id = x['entry'].id, topic = x['message'].topic, payload = x['message'].payload, expiry = l['expiry'], delay = delay, now = now))
         x['listeners'] = [l for l in x['listeners'] if l['expiry'] + delay > now]
 
     expired = [x for x in subscribed_response if not x['listeners']]
