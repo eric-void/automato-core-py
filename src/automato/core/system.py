@@ -1960,7 +1960,10 @@ def entry_do_action(entry_or_id, action, params = {}, init = None, if_event_not_
         payload = scripting_js.script_eval(actiondef['payload'], exec_context, to_dict = True)
         if payload != None:
           if 'topic' in actiondef and actiondef['topic']:
-            topic = scripting_js.script_eval(actiondef['topic'], exec_context, to_dict = True)
+            if actiondef['topic'].startswith('js:') or actiondef['topic'].startswith('jsf:'):
+              topic = scripting_js.script_eval(actiondef['topic'], exec_context, to_dict = True)
+            else:
+              topic = actiondef['topic']
           publish = [topic, payload]
           break
       else:
