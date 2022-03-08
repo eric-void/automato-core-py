@@ -11,6 +11,8 @@ import js2py
 import threading
 import re
 import json
+import random
+import string
 
 from automato.core import system
 from automato.core import utils
@@ -56,6 +58,7 @@ def script_context(context = {}):
       'now': system.time(),
       'd': utils.read_duration,
       't': _parse_datetime,
+      'uniqid': _uniqid,
       'strftime': _strftime,
       'array_sum': utils.array_sum,
       'array_avg': utils.array_avg,
@@ -300,6 +303,14 @@ def _parse_float(v):
     return float(v)
   except ValueError:
     return None
+
+uniqid_seed = ''.join(random.choice(string.ascii_lowercase) for m in range(5))
+uniqid_c = 0
+
+def _uniqid():
+  global uniqid_seed, uniqid_c
+  uniqid_c = uniqid_c + 1
+  return system.default_node_name + ':' + uniqid_seed + ':' + str(uniqid_c)
 
 def _parse_int(v):
   try:
