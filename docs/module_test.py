@@ -29,6 +29,7 @@ def test_run(entries):
   test.assertPublish('s1', 'entry_b/pub1', 'test', 
     assertEvents = {'test_event': {'port': 'test1'}}, # Check events are emitted, linked to published topic, with events params specifed
     assertSomeEvents = {'test_event': {'port': 'test1'}}, # Check events are emitted, linked to published topic, and events params cointans the specified one
+    assertNotEvents [ 'test_events' ], # No one of these events should be emitted
 
     assertSubscribe = { # Check this topic are published after the first one, and message IS the specified one
       'notify/info/entry_b/pub1': 'Entry B published pub1=test'

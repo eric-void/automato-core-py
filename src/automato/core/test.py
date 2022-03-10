@@ -103,7 +103,7 @@ def waitPublish(topic, payload, qos = 0, retain = False, timeoutms = 2000):
     system.sleep(.1)
   system.broker().mqtt_subscribe_pause_on_topic = None
 
-def assertx(name, waitPublish = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertSubscribeNotReceive = None, assertEventsTopic = None, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, assertEq = None, timeoutms = 2000, wait = True):
+def assertx(name, waitPublish = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertSubscribeNotReceive = None, assertEventsTopic = None, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertNotEvents = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, assertEq = None, timeoutms = 2000, wait = True):
   """
   Generic assert
   """
@@ -124,6 +124,11 @@ def assertx(name, waitPublish = None, assertSubscribe = None, assertSubscribeSom
   elif assertSomeEvents:
     assertsRunning[unitname]['count'] += 1
     checks.append({ 'unit': current_unit_name, 'name': name, 'topic': assertEventsTopic, 'some_events': assertSomeEvents, 'eventsdata': assertEventsData, 'maxtime': assertsRunning[unitname]['maxtime'] })
+  if assertNotEvents:
+    for t in assertNotEvents:
+      assertsRunning[unitname]['count'] += 1
+      checks.append({ 'unit': current_unit_name, 'name': name, 'topic': assertEventsTopic, 'not_events': assertNotEvents, 'maxtime': assertsRunning[unitname]['maxtime'] })
+    
   if assertSubscribe:
     for t in assertSubscribe:
       assertsRunning[unitname]['count'] += 1
@@ -167,11 +172,11 @@ def assertx(name, waitPublish = None, assertSubscribe = None, assertSubscribeSom
   if wait:
     waitRunning()
   
-def assertPublish(name, topic, payload, qos = 0, retain = False, assertEventsTopic = False, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertSubscribeNotReceive = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, timeoutms = 2000, wait = True):
+def assertPublish(name, topic, payload, qos = 0, retain = False, assertEventsTopic = False, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertNotEvents = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertSubscribeNotReceive = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, timeoutms = 2000, wait = True):
   """
   Publish a topic and check results (events, topic responses)
   """
-  assertx(name, assertEventsTopic = assertEventsTopic if assertEventsTopic else topic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertSubscribeNotReceive = assertSubscribeNotReceive, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
+  assertx(name, assertEventsTopic = assertEventsTopic if assertEventsTopic else topic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertNotEvents = assertNotEvents, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertSubscribeNotReceive = assertSubscribeNotReceive, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
   system.broker().publish(topic, payload, qos = qos, retain = retain)
   
   if wait:
@@ -185,7 +190,7 @@ def assertSubscribe(name, topic, assertPayload = None, assertSomePayload = None,
   if wait:
     waitRunning()
   
-def assertAction(name, entryname, action, params, init = None, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertEventsTopic = None, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, timeoutms = 2000, wait = True):
+def assertAction(name, entryname, action, params, init = None, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None, assertSubscribe = None, assertSubscribeSomePayload = None, assertEventsTopic = None, assertEventsData = False, assertEvents = None, assertSomeEvents = None, assertNotEvents = None, assertNotification = None, assertExports = None, assertChild = None, assertNotChild = None, timeoutms = 2000, wait = True):
   """
   Executes an action and check results (published topics)
   """
@@ -196,7 +201,7 @@ def assertAction(name, entryname, action, params, init = None, if_event_not_matc
     assertsDone[unitname] = { 'unit': current_unit_name, 'name': name, 'count': 0, 'data': {'entry_reference': [False, 'entry "' + entryname + '" referenced in assertAction ' + unitname + 'not found']} }
     
   else:
-    assertx(name, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertEventsTopic = assertEventsTopic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
+    assertx(name, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertEventsTopic = assertEventsTopic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertNotEvents = assertNotEvents, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
     entry.do(action, params, init = init, if_event_not_match = if_event_not_match, if_event_not_match_keys = if_event_not_match_keys, if_event_not_match_timeout = if_event_not_match_timeout)
     if wait:
       waitRunning()
@@ -265,6 +270,14 @@ def on_all_mqtt_messages(message):
               break
           _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(events) + ', want (some): ' + str(check['some_events']))
           delete.append(check)
+        elif 'not_events' in check and check['not_events']:
+          match = False
+          for e in check['not_events']:
+            if e in events:
+              match = True
+          if match:
+            _assertsRunningDone(unitname, 'not_events', False, 'received event: ' + str(e) + ', but i didn\'t want it')
+            delete.append(check)
         elif 'payload' in check:
           _assertsRunningDone(unitname, 'subscribe_payload', _data_match(message.payload, check['payload']), 'received: ' + str(message.payload) + ', want: ' + str(check['payload']))
           delete.append(check)
@@ -346,6 +359,8 @@ def _test_thread():
             _assertsRunningDone(unitname, 'events', False, 'received NOTHING, want: ' + str(check['events']))
           elif 'some_events' in check:
             _assertsRunningDone(unitname, 'some_events', False, 'received NOTHING, want (some): ' + str(check['some_events']))
+          elif 'not_events' in check:
+            _assertsRunningDone(unitname, 'not_events', True, None)
           elif 'payload' in check:
             _assertsRunningDone(unitname, 'subscribe_payload', False, 'received NOTHING, want: ' + topic + ' = ' + str(check['payload']))
           elif 'some_payload' in check:
