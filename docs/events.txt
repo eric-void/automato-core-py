@@ -23,7 +23,7 @@ Events/actions:
 - ACTION: output-set: { value: 'X', [timer_to: seconds|timestamp] } 
 - ACTION: output-get: {}
 - ACTION: output-invert: { [value: 'X'], [timer_to: seconds|timestamp] } // NOTA: value è inutile per i toggle (0,1), ma potrebbe invece essere utile per i multi-value (per invertire solo un certo valore)
-- input: { value: int }
+- input: { value: int, [channel: singlepush|doublepush|longpush] } // WARN tasmota channels: ['SINGLE', 'DOUBLE', 'TRIPLE', 'QUAD', 'PENTA', 'HOLD']
 - ACTION: input-get: {}
 
 - temperature: { value: float, [unit: 'C'] }
