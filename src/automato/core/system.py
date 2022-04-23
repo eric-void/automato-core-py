@@ -1611,7 +1611,6 @@ def subscribe_response(entry, message, callback = False, no_response_callback = 
     for x in subscribed_response:
       if x['id'] and x['id'] == id:
         return False
-      
   
   s = { 'message': message, 'callback': callback, 'no_response_callback': no_response_callback, 'entry': entry, 'id': id, 'listeners': [] }
 
@@ -1964,14 +1963,14 @@ def entry_do_action(entry_or_id, action, params = {}, init = None, if_event_not_
               topic = scripting_js.script_eval(actiondef['topic'], exec_context, to_dict = True)
             else:
               topic = actiondef['topic']
-          publish = [topic, payload]
+          publish = [topic, payload, actiondef['qos'] if 'qos' in actiondef else 0, actiondef['retain'] if 'retain' in actiondef else False]
           break
       else:
-        publish = [topic, None]
+        publish = [topic, None, actiondef['qos'] if 'qos' in actiondef else 0, actiondef['retain'] if 'retain' in actiondef else False]
         break
 
     if publish:
-      entry.publish(publish[0], publish[1])
+      entry.publish(publish[0], publish[1], publish[2], publish[3])
       event_get_invalidate_on_action(entry, action, exec_context['params'], if_event_not_match)
       return True
 
