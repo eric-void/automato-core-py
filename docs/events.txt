@@ -13,9 +13,10 @@ Common parameters:
 Events/actions:
 - clock: {value: timestamp}: message contains information about current device time
 
-- connected: { value: boolean(1|0), [temporary: true], ['ip_address': None], ['mac_address': '0A:0B:0C:0D:0E:0F'] }: usually connected to LWT @see modules/health
+- connected: { value: boolean(1|0), [temporary: true], ['ip_address': None], ['mac_address': '0A:0B:0C:0D:0E:0F'], ['was_connected': true|false], ['method': '...'], ['prev_ip_address': '...'] }: usually connected to LWT @see modules/health
   if the entry is disconnected, connected = { value: 0 } is sent
   if the connection is temporary (button), connected = { value: 1, temporary: true } is sent
+  if connection is based on net sniffing, ip_address is ALWAY set with ipv4 address, or None if no address is detected. During disconnection (value = 0), ip_address is always NONE (prev_ip_address could contain the ip address before the disconnection)
 - alive: { value: boolean(1|0) }: entry is connected and sending messages @see modules/health, if 0 entry is not connected or not sending any message for a long time @see modules/health
 - failure: { value: boolean, [reason: ""] }
 
