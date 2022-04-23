@@ -270,7 +270,10 @@ def _var_to_python(v):
   if isinstance(v, js2py.base.PyJs):
     v = v.to_python()
   if isinstance(v, js2py.base.JsObjectWrapper):
-    v = v.to_dict()
+    if v._obj.Class in ['Array', 'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array']:
+      v = v.to_list()
+    else:
+      v = v.to_dict()
   return v
   
 def _parse_datetime(v):
