@@ -1918,6 +1918,9 @@ def entry_support_action(entry, actionname):
 def entry_actions_supported(entry):
   return list(entry.actions.keys)
 
+def do_action_lambda(entry):
+  return lambda actionref, params = {}, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None: do_action(actionref, params = params, reference_entry_id = entry, if_event_not_match = if_event_not_match, if_event_not_match_keys = if_event_not_match_keys, if_event_not_match_timeout = if_event_not_match_timeout)
+  
 def do_action(actionref, params = {}, reference_entry_id = None, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None):
   d = decode_action_reference(actionref, default_entry_id = reference_entry_id)
   return entry_do_action(d['entry'], d['action'], params, d['init'], if_event_not_match = if_event_not_match, if_event_not_match_keys = if_event_not_match_keys, if_event_not_match_timeout = if_event_not_match_timeout) if d else None
