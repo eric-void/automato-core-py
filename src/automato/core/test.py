@@ -123,7 +123,7 @@ def assertx(name, waitPublish = None, assertSubscribe = None, assertSubscribeSom
     checks.append({ 'unit': current_unit_name, 'name': name, 'topic': assertEventsTopic, 'events': assertEvents, 'eventsdata': assertEventsData, 'maxtime': assertsRunning[unitname]['maxtime'] })
   elif assertSomeEvents:
     assertsRunning[unitname]['count'] += 1
-    checks.append({ 'unit': current_unit_name, 'name': name, 'topic': assertEventsTopic, 'some_events': assertSomeEvents, 'eventsdata': assertEventsData, 'maxtime': assertsRunning[unitname]['maxtime'] })
+    checks.append({ 'unit': current_unit_name, 'name': name, 'topic': assertEventsTopic, 'some_events': assertSomeEvents, 'some_events_init': assertSomeEvents, 'eventsdata': assertEventsData, 'maxtime': assertsRunning[unitname]['maxtime'] })
   if assertNotEvents:
     for t in assertNotEvents:
       assertsRunning[unitname]['count'] += 1
@@ -176,7 +176,7 @@ def assertPublish(name, topic, payload, qos = 0, retain = False, assertEventsTop
   """
   Publish a topic and check results (events, topic responses)
   """
-  assertx(name, assertEventsTopic = assertEventsTopic if assertEventsTopic else topic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertNotEvents = assertNotEvents, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertSubscribeNotReceive = assertSubscribeNotReceive, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
+  assertx(name, assertEventsTopic = assertEventsTopic if assertEventsTopic != False else topic, assertEventsData = assertEventsData, assertEvents = assertEvents, assertSomeEvents = assertSomeEvents, assertNotEvents = assertNotEvents, assertSubscribe = assertSubscribe, assertSubscribeSomePayload = assertSubscribeSomePayload, assertSubscribeNotReceive = assertSubscribeNotReceive, assertNotification = assertNotification, assertExports = assertExports, assertChild = assertChild, assertNotChild = assertNotChild, timeoutms = timeoutms, wait = False)
   system.broker().publish(topic, payload, qos = qos, retain = retain)
   
   if wait:
@@ -263,13 +263,20 @@ def on_all_mqtt_messages(message):
             _assertsRunningDone(unitname, 'events', _data_match(events, check['events']), 'received: ' + str(events) + ', want: ' + str(check['events']))
           delete.append(check)
         elif 'some_events' in check and check['some_events']:
-          match = True
-          for e in check['some_events']:
-            if not e in events or not _data_match(events[e], check['some_events'][e]):
-              match = False
-              break
-          _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(events) + ', want (some): ' + str(check['some_events']))
-          delete.append(check)
+          if check['topic'] != None:
+            match = True
+            for e in check['some_events']:
+              if not e in events or not _data_match(events[e], check['some_events'][e]):
+                match = False
+                break
+            _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(events) + ', want (some): ' + str(check['some_events']))
+            delete.append(check)
+          else:
+            print(events)
+            check['some_events'] = {e: check['some_events'][e] for e in check['some_events'] if not e in events or not _data_match(events[e], check['some_events'][e])}
+            if not check['some_events']:
+              _assertsRunningDone(unitname, 'some_events', True, 'received: all, want (some): ' + str(check['some_events_init']))
+              delete.append(check)
         elif 'not_events' in check and check['not_events']:
           match = False
           for e in check['not_events']:
@@ -358,7 +365,8 @@ def _test_thread():
           elif 'events' in check:
             _assertsRunningDone(unitname, 'events', False, 'received NOTHING, want: ' + str(check['events']))
           elif 'some_events' in check:
-            _assertsRunningDone(unitname, 'some_events', False, 'received NOTHING, want (some): ' + str(check['some_events']))
+            some_events_received = [e for e in check['some_events_init'] if e not in check['some_events']]
+            _assertsRunningDone(unitname, 'some_events', False, 'received: ' + ('NOTHING' if not some_events_received else str(some_events_received)) + ', want (some): ' + str(check['some_events_init']))
           elif 'not_events' in check:
             _assertsRunningDone(unitname, 'not_events', True, None)
           elif 'payload' in check:
