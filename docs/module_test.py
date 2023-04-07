@@ -14,6 +14,12 @@ def test_init():
         "caption": "Device",
         "device": "test",
         "...": "...",
+        
+        "publish": {
+          "topic": {
+            "events_debug": 1, # Log events emitted
+          }
+        }
       },
     ]
   })
@@ -28,7 +34,7 @@ def test_run(entries):
   # Publish a topic and then wait asserts
   test.assertPublish('s1', 'entry_b/pub1', 'test', 
     assertEvents = {'test_event': {'port': 'test1'}}, # Check events are emitted, linked to published topic, with events params specifed
-    assertSomeEvents = {'test_event': {'port': 'test1'}}, # Check events are emitted, linked to published topic, and events params cointans the specified one
+    assertSomeEvents = {'test_event': {'port': 'test1'}}, # Check events are emitted, linked to published topic, and events params cointains the specified one
     assertNotEvents [ 'test_events' ], # No one of these events should be emitted
 
     assertSubscribe = { # Check this topic are published after the first one, and message IS the specified one
@@ -37,7 +43,7 @@ def test_run(entries):
       'reason': ('re', '.*test-device.*dead.*'), # regexp
       'x': ('*', ), # Match is always true ('x' should exist, but all values are correct)
       'x': (), # Like above (match always true)
-    }),
+    },
     assertSubscribeSomePayload = {'item/test-toggle': {'state': 1, 'timer-to': 0 }}, # Check this topic are published, and message CONTAINS the specified one
     assertSubscribeNotReceive = ['device/test-device/health', 'item/test-item/health'], # Check this topic are NOT published
     
@@ -53,7 +59,8 @@ def test_run(entries):
 
   # Do an action on a specific entry
   test.assertAction('s6', 'entry_b', 'test_action', { 'value': '1' }, init = 'js:params["val2"] = "0"', 
-    assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}} # To check for events you should specify an events topic (if NOT, it will check on all events emitted)
+    assertEventsTopic = 'subs/entry_b/response', assertEvents = {'test_action_response': {}} # To check for events you should specify an events topic (if NOT, it will check on FIRST published message)
+    assertSomeEvents = {'test_action_response': {}}, # if assertSomeEvents is specified WITHOUT assertEventsTopic it will check an ALL events emitted by ALL published messages until check timeout (this is valid only for assertSomeEvents, assertEvents check only in first published message, see above)
     assertSubscribe = {'subs/entry_b': 'test10', 'subs/entry_b/response': 'ok'},
     assertChild = ['entry_b_on_subscribed_message', 'entry_b_publish', 'entry_b_on_events_passthrough'], 
   )
@@ -61,7 +68,7 @@ def test_run(entries):
   
   # Generic assert with no action performed (no publish / subscribe / action)
   test.assertx('t1', 
-    waitPublish = {'topic1': 'payload1:', ...}, # Do some "waitPublish" commands before the rest of the start starts
+    waitPublish = {'topic1': 'payload1:', ...}, # Do some "waitPublish" commands before the rest of the start
     assertSubscribe = {'device/test-rf-1/detected': ''}, assertEventsTopic = 'device/test-rf-1/detected', assertEvents = {'detected': {}, 'input': {'value': 1, 'temporary': 1}}, wait = False)
   # ... DO SOMETHING
   # ... example: node_system.run_step()

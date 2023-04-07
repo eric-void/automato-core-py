@@ -38,6 +38,8 @@ Events/actions:
 - tamper: { value: [int] }
 
 - battery: { value: int } # value 0..100
+- autonomy: { value: seconds }
+- load: { value: int } # %
 
 - presence-in: {"who": string, "before_someone_inside": bool, "region": "home" }
 - presence-out: {"who": string, "after_someone_inside": bool, "region": "home" }
