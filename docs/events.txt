@@ -36,6 +36,7 @@ Events/actions:
 - water-leak: { value: [int] } # Inserito anche input con channel = "water-leak"
 - vibration: { value: [int], temporary: true } # in genere quando value = 1 => temporary = true (se value = 0 invece si intende stato stabile senza temporary)
 - tamper: { value: [int] }
+- occupancy: { value: [int] }
 
 - battery: { value: int } # value 0..100
 - autonomy: { value: seconds }
