@@ -220,11 +220,11 @@ def array_sum(a, decimals = -1):
       c = c + 1
   return (round(res) if decimals >= 0 else res) if c > 0 else None
   
-def array_avg(a, decimals = -1):
+def array_avg(a, decimals = -1, valid_min = None, valid_max = None):
   res = 0
   c = 0
   for i in a:
-    if i is not None:
+    if i is not None and (valid_min is None or i >= valid_min) and (valid_max is None or i <= valid_max):
       res = res + i
       c = c + 1
   return (round(res / c, decimals) if decimals >= 0 else res / c) if c > 0 else None
