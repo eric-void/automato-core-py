@@ -114,7 +114,7 @@ def notification_build(published_message):
 class PayloadDict(collections.abc.MutableMapping, dict):
   def __getitem__(self, key):
     default = '-'
-    m = re.search('^(.*)!(strftime|caption|\'.*\')(?:|\((.*)\))$', key)
+    m = re.search(r'^(.*)!(strftime|caption|\'.*\')(?:|\((.*)\))$', key)
     if m and dict.__contains__(self, m.group(1)):
       if m.group(2) == 'strftime':
         try:

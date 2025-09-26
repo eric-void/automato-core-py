@@ -807,7 +807,7 @@ def entries_definition_exportable():
 def message_payload_serialize(payload):
   return str(payload if not isinstance(payload, dict) else {x:payload[x] for x in sorted(payload)})
 
-_re_topic_matches = re.compile('^(?:(?P<topic_simple>[a-zA-Z0-9#+_-][a-zA-Z0-9#+_/-]*)|/(?P<topic_regex>.*)/)' + '(?:\[(?:js:(?P<js_filter>.*)|/(?P<payload_regex_filter>.*)/|(?P<payload_simple_filter>.*))\])?$')
+_re_topic_matches = re.compile(r'^(?:(?P<topic_simple>[a-zA-Z0-9#+_-][a-zA-Z0-9#+_/-]*)|/(?P<topic_regex>.*)/)' + r'(?:\[(?:js:(?P<js_filter>.*)|/(?P<payload_regex_filter>.*)/|(?P<payload_simple_filter>.*))\])?$')
 _re_topic_matches_cache = {} # TODO put a limit on _re_topic_matches_cache (now it can grows forever!)
 #_cache_topic_matches = {}
 #_cache_topic_matches_hits = 0
@@ -2081,7 +2081,7 @@ def events_export():
     all_events[entry_id] = entry_events_published(entry_id)
   return all_events
 
-_re_decode_event_reference = re.compile('^(?P<entry>[A-Za-z0-9@*_-]+)?(?:\.(?P<event>[A-Za-z0-9_-]+))?(?:\((?P<condition>.*)\))?$')
+_re_decode_event_reference = re.compile(r'^(?P<entry>[A-Za-z0-9@*_-]+)?(?:\.(?P<event>[A-Za-z0-9_-]+))?(?:\((?P<condition>.*)\))?$')
 
 def decode_event_reference(s, default_entry_id = None, default_event = None, no_event = False):
   """
@@ -2097,7 +2097,7 @@ def decode_event_reference(s, default_entry_id = None, default_event = None, no_
     m['event'] = default_event
   return m if m and m['entry'] and (m['event'] or no_event) else None
 
-_re_decode_action_reference = re.compile('^(?P<entry>[A-Za-z0-9@*_-]+)?(?:\.(?P<action>[A-Za-z0-9_-]+))?(?:\((?P<init>.*)\))?$')
+_re_decode_action_reference = re.compile(r'^(?P<entry>[A-Za-z0-9@*_-]+)?(?:\.(?P<action>[A-Za-z0-9_-]+))?(?:\((?P<init>.*)\))?$')
 
 def decode_action_reference(s, default_entry_id = None, default_action = None, no_action = False):
   """

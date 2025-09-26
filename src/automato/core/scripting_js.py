@@ -191,7 +191,7 @@ def _script_code_uses_full_var(code, var):
   # Return if code uses the var, without dict key reference ("payload[x]" or "x in payload" uses key reference, "payload" not)
   parts = re.split(r'\b' + var + r'\b', code)
   for i in range(0, len(parts) - 1):
-    if not re.search(r'\b(typeof|in)\s*$', parts[i]) and not re.search(r'^(\.|\[)', parts[i + 1]):
+    if not re.search(r'\b(typeof|in)\\ \\s*$', parts[i]) and not re.search(r'^(\\ \\.|\\ \\[)', parts[i + 1]):
       return True
   return False
 """
