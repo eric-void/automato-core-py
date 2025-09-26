@@ -33,10 +33,12 @@ Events/actions:
 - energy: {"power": int, "power_reactive": int, "power_apparent": int, "power_factor": float, "power:unit": "W", "energy_today": float, "energy_yesterday": float, "energy_total": float, "total_starttime": int, "total_duration": int, "energy:unit": "kWh", "voltage": int, "voltage:unit": "V", "current": float, "current:unit": "A"  }
 - netspeed: {"download": int, "download:unit": "bps", "upload": int, "upload:unit": "bps", "ping": float, "ping:unit": "ms", "error": string}
 - bandwidth: come sopra ma per la rete usata
-- water-leak: { value: [int] } # Inserito anche input con channel = "water-leak"
-- vibration: { value: [int], temporary: true } # in genere quando value = 1 => temporary = true (se value = 0 invece si intende stato stabile senza temporary)
-- tamper: { value: [int] }
-- occupancy: { value: [int] }
+- water-leak: { value: [int:0|1] } # Inserito anche input con channel = "water-leak"
+- vibration: { value: [int:0|1], temporary: true } # in genere quando value = 1 => temporary = true (se value = 0 invece si intende stato stabile senza temporary)
+- tamper: { value: [int:0|1] }
+- occupancy: { value: [int:0|1] } # Inserito anche input con channel = "occupancy"
+- illuminance: { value: [int] }
+- contact: { value: [int:0|1] } # Inserito anche input con channel = "contact", e altro input con channel = "contact-open" (per distinguere il caso di contatto aperto, tipico di un sensore porta)
 
 - battery: { value: int } # value 0..100
 - autonomy: { value: seconds }
