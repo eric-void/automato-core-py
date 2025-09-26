@@ -84,7 +84,10 @@ def connect(callback = None):
   client_id = settings['client_id']
   if settings['client_id_random_postfix']:
     client_id = client_id + '-' + (''.join(random.choice(string.ascii_lowercase) for m in range(5)))
-  client = mqtt.Client(client_id)
+  if hasattr(mqtt, 'CallbackAPIVersion') and hasattr(mqtt.CallbackAPIVersion, 'VERSION1'):
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id)
+  else:
+    client = mqtt.Client(client_id)
   client.username_pw_set(settings['broker_user'], settings['broker_pass'])
   client.on_connect = _onConnect
   client.on_disconnect = _onDisconnect
