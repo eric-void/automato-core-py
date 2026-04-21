@@ -30,7 +30,8 @@ Events/actions:
 - temperature: { value: float, [unit: 'C'] }
 - humidity: { value: float }
 - pressure: { value: float, [unit: 'hPa'] }
-- energy: {"power": int, "power_reactive": int, "power_apparent": int, "power_factor": float, "power:unit": "W", "energy_today": float, "energy_yesterday": float, "energy_total": float, "total_starttime": int, "total_duration": int, "energy:unit": "kWh", "voltage": int, "voltage:unit": "V", "current": float, "current:unit": "A"  }
+- energy: {"power": int, "power_reactive": int, "power_apparent": int, "power_factor": float, "power:unit": "W", "energy_today": float, "energy_yesterday": float, "energy_total": float, "total_starttime": int, "total_duration": int, "energy:unit": "kWh", "voltage": int, "voltage:unit": "V", "current": float, "current:unit": "A", "frequency": float, "frequency:unit": "Hz", "energy_returned": float, "energy_returned:unit": "kWh" }
+  WARN: shelly gen1 usa "energy" invece di "energy_total" (gen2+ invece usa correttamente "energy_total"). "energy_returned" è solo negli shelly
 - netspeed: {"download": int, "download:unit": "bps", "upload": int, "upload:unit": "bps", "ping": float, "ping:unit": "ms", "error": string}
 - bandwidth: come sopra ma per la rete usata
 - water-leak: { value: [int:0|1] } # Inserito anche input con channel = "water-leak"
