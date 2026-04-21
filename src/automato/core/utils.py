@@ -148,7 +148,7 @@ def json_export(v):
     return json.dumps(v, allow_nan = False)
   except ValueError as e:
     if str(e) == 'Out of range float values are not JSON compliant' or str(e) == 'Out of range float values are not JSON compliant: nan':
-      logging.exception("utils.json_export> trying to export a value with NaN values, i'll try to convert them to null... (value: " + str(v) + ")")
+      logging.warn("utils.json_export> trying to export a value with NaN values, converting them to null... (value: " + str(v) + ")")
       v = nan_remove(v)
       try:
         return json.dumps(v, allow_nan = False)
