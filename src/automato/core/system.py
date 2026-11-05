@@ -373,7 +373,7 @@ class Entry(object):
     if not 'events_listen' in self.definition:
       self.definition['events_listen'] = []
 
-def entry_load(definitions, node_name = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False):
+def entry_load(definitions, node_name = False, unload_other_from_node = False, id_from_definition = False, generate_new_entry_id_on_conflict = False, call_on_entries_change = True):
   """
   Load a batch of definitions to instantiate entries.
   There are 2 phases for this process:
@@ -465,7 +465,7 @@ def entry_load(definitions, node_name = False, unload_other_from_node = False, i
     logging.debug("SYSTEM> Loaded entries {entries}.".format(entries = list(loaded_defs.keys())))
 
   # Calls handler_on_entries_change
-  if handler_on_entries_change:
+  if call_on_entries_change and handler_on_entries_change:
     for h in handler_on_entries_change:
       h(list(loaded_defs.keys()), unloaded)
 
@@ -554,7 +554,7 @@ def entry_reload(entry_ids, call_on_entries_change = True):
     if entry_id in all_entries:
       definition = all_entries[entry_id].definition_loaded
       entry_unload(entry_id, call_on_entries_change = False)
-      entry_load(definition, None, entry_id, generate_new_entry_id_on_conflict = False, call_on_entries_change = False)
+      entry_load({ entry_id: definition }, call_on_entries_change = False)
 
   if call_on_entries_change and handler_on_entries_change:
     for h in handler_on_entries_change:
@@ -697,7 +697,7 @@ def _entry_add_to_index_topic_published(entry, topic, definition):
   global index_topic_published
   if topic not in index_topic_published:
     index_topic_published[topic] = { 'definition': {}, 'entries': []}
-  elif topic in index_topic_published[topic]['entries']:
+  elif entry.id in index_topic_published[topic]['entries']:
     _entry_remove_from_index_topic_published(entry, topic, rebuild_definition = False)
   index_topic_published[topic]['definition'] = _entry_index_definition_build(index_topic_published[topic]['entries'], 'publish', topic, add_definition = definition)
   index_topic_published[topic]['entries'].append(entry.id)
@@ -714,7 +714,7 @@ def _entry_add_to_index_topic_subscribed(entry, topic, definition):
   global index_topic_subscribed
   if topic not in index_topic_subscribed:
     index_topic_subscribed[topic] = { 'definition': {}, 'entries': []}
-  elif topic in index_topic_subscribed[topic]['entries']:
+  elif entry.id in index_topic_subscribed[topic]['entries']:
     _entry_remove_from_index_topic_subscribed(entry, topic, rebuild_definition = False)
   index_topic_subscribed[topic]['definition'] = _entry_index_definition_build(index_topic_subscribed[topic]['entries'], 'subscribe', topic, add_definition = definition)
   index_topic_subscribed[topic]['entries'].append(entry.id)
@@ -1838,7 +1838,7 @@ def entry_support_event(entry, eventname):
   return False
 
 def entry_events_supported(entry):
-  return list(entry.events.keys)
+  return list(entry.events.keys())
 
 def on_event(eventref, listener = None, reference_entry = None, reference_tag = None):
   """
@@ -1916,7 +1916,7 @@ def entry_support_action(entry, actionname):
   return False
 
 def entry_actions_supported(entry):
-  return list(entry.actions.keys)
+  return list(entry.actions.keys())
 
 def do_action_lambda(entry):
   return lambda actionref, params = {}, if_event_not_match = False, if_event_not_match_keys = False, if_event_not_match_timeout = None: do_action(actionref, params = params, reference_entry_id = entry, if_event_not_match = if_event_not_match, if_event_not_match_keys = if_event_not_match_keys, if_event_not_match_timeout = if_event_not_match_timeout)
@@ -2015,7 +2015,7 @@ def entry_event_get(entry_or_id, eventname, condition = None, keys = None, timeo
   return None if keys is None or len(keys) == 1 else tuple(None for k in keys)
 
 def entry_event_get_time(entry_or_id, eventname, timeout = None, temporary = False):
-  entry_event_get(entry_or_id, eventname, ['_time'], timeout, temporary)
+  return entry_event_get(entry_or_id, eventname, keys = ['_time'], timeout = timeout, temporary = temporary)
 
 def entry_events_published(entry_or_id):
   """
@@ -2057,7 +2057,7 @@ def events_import(data, import_mode = 0, invoke_mode = 2):
             events_published[eventname] = {}
           if not entry_id in events_published[eventname]:
             events_published[eventname][entry_id] = {}
-          prevdata = events_published[eventname][entry_id][keys_index] if keys_index in this.events_published[eventname][entry_id] else None
+          prevdata = events_published[eventname][entry_id][keys_index] if keys_index in events_published[eventname][entry_id] else None
           go = import_mode == 3 or (not prevdata) or (prevdata['time'] == -1 and eventdata['time'] > 0)
           if (not go) and import_mode == 0:
             go = prevdata['time'] <= 0 and eventdata['time'] > 0
@@ -2069,7 +2069,7 @@ def events_import(data, import_mode = 0, invoke_mode = 2):
             if import_mode == -1 and eventdata['time'] > 0:
               eventdata['time'] = - eventdata['time']
             events_published[eventname][entry_id][keys_index] = eventdata
-            if (not temporary) and invoke_mode > 0 and (invoke_mode == 3 or (invoke_mode == 2 or eventdata['time'] != -1) or (invoke_mode == 1 and eventdata['time'] >= 0)):
+            if (not temporary) and invoke_mode > 0 and (invoke_mode == 3 or (invoke_mode == 2 and eventdata['time'] != -1) or (invoke_mode == 1 and eventdata['time'] >= 0)):
               _e = entry_get(entry_id)
               if _e:
                 _entry_event_invoke_listeners(_e, eventdata, 'import')
