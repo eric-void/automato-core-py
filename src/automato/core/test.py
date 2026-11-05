@@ -52,6 +52,7 @@ def run():
 def summary():
   logging.info('TEST SUMMARY:')
   assertsTree = {}
+  success = bool(assertsDone) and not assertsRunning and not checks
   for unitname in assertsDone:
     if not assertsDone[unitname]['unit'] in assertsTree:
       assertsTree[assertsDone[unitname]['unit']] = { 'ok': 0, 'error': 0, 'tests': []}
@@ -74,12 +75,14 @@ def summary():
     if not assertsTree[unit]['error']:
       logging.info('{unit}: {count}/{count} OK'.format(unit = unit, count = assertsTree[unit]['ok']))
     else:
+      success = False
       logging.error('{unit}: {ok}/{count} OK, {error}/{count} ERROR!'.format(unit = unit, count = assertsTree[unit]['ok'] + assertsTree[unit]['error'], ok = assertsTree[unit]['ok'], error = assertsTree[unit]['error']))
     for unitname in assertsTree[unit]['tests']:
       if not assertsDone[unitname]['_tests_error']:
         logging.info('    ' + assertsDone[unitname]['_message'])
       else:
         logging.error('    ' + assertsDone[unitname]['_message'])
+  return success
 
 def waitRunning():
   global assertsRunning
@@ -415,4 +418,3 @@ def _test_thread():
     #    assertDone(unitname, timeout = True)
     
     system.sleep(.5)
-
