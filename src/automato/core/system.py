@@ -915,6 +915,23 @@ def topic_match_priority(definition):
       return 1
   return 0
 
+def topic_rule_is_exact(rule):
+  """
+  Return True if the topic part of the rule has no wildcards ("#", "+") and is not a regexp (the payload filter part is not considered)
+  """
+  global _re_topic_matches
+  m = _re_topic_matches.match(rule)
+  return True if m and m.group('topic_simple') and '#' not in m.group('topic_simple') and '+' not in m.group('topic_simple') else False
+
+def topic_rule_preferred(rule, definition, other_rule, other_definition):
+  """
+  When two topic rules of the same entry match the same topic, return True if "rule" should be chosen instead of "other_rule" (the one chosen so far).
+  The rule with the higher topic_match_priority wins. With the same priority, an exact rule wins over a rule with wildcards or a regexp. Otherwise the rule chosen so far is kept.
+  """
+  priority = topic_match_priority(definition)
+  other_priority = topic_match_priority(other_definition)
+  return priority > other_priority or (priority == other_priority and topic_rule_is_exact(rule) and not topic_rule_is_exact(other_rule))
+
 def topic_cache_reset():
   global index_topic_cache, index_topic_cache_lock
   with index_topic_cache_lock:
@@ -1060,7 +1077,7 @@ def entries_publishers_of(topic, payload = None, strict_match = False):
         if entry:
           tmp = topic_match_priority(entry.definition['publish'][t[0]])
           if tmp > 0 or not entry_is_subscribed_to(entry, topic, payload):
-            if entry_id in res and tmp > topic_match_priority(res[entry_id]['definition']):
+            if entry_id in res and topic_rule_preferred(t[0], entry.definition['publish'][t[0]], res[entry_id]['topic'], res[entry_id]['definition']):
               del res[entry_id]
             if not entry_id in res:
               res[entry_id] = {
@@ -1101,7 +1118,7 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
       for entry_id in t[1]['entries']:
         entry = entry_get(entry_id)
         if entry:
-          if entry_id in res and topic_match_priority(entry.definition['subscribe'][t[0]]) > topic_match_priority(res[entry_id]['definition']):
+          if entry_id in res and topic_rule_preferred(t[0], entry.definition['subscribe'][t[0]], res[entry_id]['topic'], res[entry_id]['definition']):
             del res[entry_id]
           if not entry_id in res:
             res[entry_id] = {
