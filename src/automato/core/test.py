@@ -251,6 +251,10 @@ def on_all_mqtt_messages(message):
   global assertsRunning, checks
   eventsdata = message.events()
   events = {e['name']: e['params'] for e in eventsdata}
+  # A message can generate more events with the same name (ex: one per port): "some_events" checks match any of them
+  events_all = {}
+  for e in eventsdata:
+    events_all.setdefault(e['name'], []).append(e['params'])
   
   delete = []
   for check in checks:
@@ -269,14 +273,14 @@ def on_all_mqtt_messages(message):
           if check['topic'] != None:
             match = True
             for e in check['some_events']:
-              if not e in events or not _data_match(events[e], check['some_events'][e]):
+              if not _some_event_match(events_all, e, check['some_events'][e]):
                 match = False
                 break
             _assertsRunningDone(unitname, 'some_events', match, 'received: ' + str(events) + ', want (some): ' + str(check['some_events']))
             delete.append(check)
           else:
             print(events)
-            check['some_events'] = {e: check['some_events'][e] for e in check['some_events'] if not e in events or not _data_match(events[e], check['some_events'][e])}
+            check['some_events'] = {e: check['some_events'][e] for e in check['some_events'] if not _some_event_match(events_all, e, check['some_events'][e])}
             if not check['some_events']:
               _assertsRunningDone(unitname, 'some_events', True, 'received: all, want (some): ' + str(check['some_events_init']))
               delete.append(check)
@@ -317,6 +321,9 @@ def on_all_mqtt_messages(message):
     unitname = check['unit'] + '.' + check['name'] if check['unit'] else False
     if unitname and unitname in assertsRunning and len(assertsRunning[unitname]['data']) >= assertsRunning[unitname]['count']:
       assertDone(unitname)
+
+def _some_event_match(events_all, name, check):
+  return any(_data_match(params, check) for params in events_all.get(name, []))
 
 def _data_match(value, check):
   if value == check:
