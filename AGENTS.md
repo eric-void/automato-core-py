@@ -14,4 +14,4 @@ Python implementation of Automato's shared core. Read `../AGENTS.md` and `../ARC
 
 This is a protocol-defining implementation; changes to entry schemas, exported metadata, events/actions, topic matching or payloads can affect the node, JS core, clients and config. Keep JS behavior in `../automato-core-js/src/automato/core` aligned when the API/wire semantics are shared. The node adds runtime/module semantics around this core; avoid importing node-specific assumptions into it.
 
-Dependencies listed in `requirements.txt` are paho-mqtt and Js2Py. Use `PYTHONPATH=src` for source-tree imports where needed. Consult repository tests before changing behavior; do not assume stale docs are authoritative.
+Dependencies listed in `requirements.txt` are paho-mqtt (>= 2.0; `mqtt.py` still accepts 1.x), Js2Py and python-dateutil. Use `PYTHONPATH=src` for source-tree imports where needed. Consult repository tests before changing behavior; do not assume stale docs are authoritative.

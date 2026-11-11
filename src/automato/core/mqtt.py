@@ -84,10 +84,12 @@ def connect(callback = None):
   client_id = settings['client_id']
   if settings['client_id_random_postfix']:
     client_id = client_id + '-' + (''.join(random.choice(string.ascii_lowercase) for m in range(5)))
-  if hasattr(mqtt, 'CallbackAPIVersion') and hasattr(mqtt.CallbackAPIVersion, 'VERSION1'):
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id)
+  if hasattr(mqtt, 'CallbackAPIVersion'):
+    # paho-mqtt >= 2.0
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id = client_id)
   else:
-    client = mqtt.Client(client_id)
+    # paho-mqtt 1.x (callbacks below accept both signatures)
+    client = mqtt.Client(client_id = client_id)
   client.username_pw_set(settings['broker_user'], settings['broker_pass'])
   client.on_connect = _onConnect
   client.on_disconnect = _onDisconnect
@@ -106,8 +108,13 @@ def connect(callback = None):
       system.sleep(5)
   client.loop_start()
 
-def _onConnect(client, userdata, flags, rc):
+# paho-mqtt 2.x: (client, userdata, flags, reason_code, properties), 1.x: (client, userdata, flags, rc)
+def _onConnect(client, userdata, flags, reason_code, properties = None):
   global connected, connected_since, disconnect_queue, settings
+  if reason_code != 0:
+    # paho will retry the connection
+    logging.error('connection refused by mqtt broker: {rc}'.format(rc = reason_code))
+    return
   logging.debug('connected')
   if "all" in settings and settings['all']:
     client.subscribe("#")
@@ -125,11 +132,13 @@ def _onConnect(client, userdata, flags, rc):
       publish(q[0], q[1], q[2], q[3])
     disconnect_queue = []
 
-def _onDisconnect(client, userdata, rc):
+# paho-mqtt 2.x: (client, userdata, disconnect_flags, reason_code, properties), 1.x: (client, userdata, rc)
+def _onDisconnect(client, userdata, *args):
   global connected, connected_since
+  reason_code = args[1] if len(args) >= 2 else args[0]
   connected = 0
   connected_since = 0
-  if rc != 0:
+  if reason_code != 0:
     logging.error('unexpected disconnection from mqtt broker')
   else:
     logging.debug('disconnected from mqtt broker')
