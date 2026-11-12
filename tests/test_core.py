@@ -79,6 +79,22 @@ class MessagesTest(CoreTestCase):
     self.assertEqual(self.broker.published[-1]['topic'], 'dev/set')
     self.assertEqual(system.utils.json_import(self.broker.published[-1]['payload']), {'port': '1', 'value': 1})
 
+class BrokerCacheTest(CoreTestCase):
+  def test_received_payloads_are_cached(self):
+    # Scripts in configurations read the last payload of a topic with broker.get(topic, key) (e.g. alarm reads home/presence occupants)
+    import time, types
+    from automato.core import mqtt
+    mqtt._onMessage(None, None, types.SimpleNamespace(topic = 'home/presence', payload = b'{"occupants": ["eric"]}', retain = False, qos = 0))
+    for i in range(100):
+      if mqtt.get('home/presence') is not None:
+        break
+      time.sleep(.02)
+    self.assertEqual(system.broker().get('home/presence', 'occupants'), ['eric'])
+    self.assertEqual(system.broker().get('home/presence', 'missing', 0), 0)
+    self.assertIsNone(system.broker().get('other/topic', 'x'))
+    # _onMessage flags the connection as established: there is no real client to disconnect
+    mqtt.connected = 0
+
 class EventsTest(CoreTestCase):
   config = { 'listen_all_events': True }
   definitions = { 'dev@test': DEVICE }

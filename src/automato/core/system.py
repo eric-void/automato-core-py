@@ -86,7 +86,7 @@ def boot():
   mqtt.init()
   mqtt_config = {
     'client_id': 'automato-node',
-    'cache': False, # mqtt.get()/getTime() cache of all received payloads: not used by the node, and it costs memory
+    'cache': True, # mqtt.get()/getTime() cache of all received payloads: used by scripts in configurations (broker.get(topic, key)), do not disable
     'all': True, 
     'subscribe': { '[all]': _on_mqtt_message },
     'publish_before_connection_policy': 'queue', # connect, queue, error
