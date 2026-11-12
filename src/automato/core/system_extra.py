@@ -60,11 +60,17 @@ def init_logging(config):
   format = '%(asctime)s - ' + (config['name'] if 'name' in config else '%(name)s') + '/%(module)s - %(levelname)s - %(message)s'
   dateformat = '%Y-%m-%d %H:%M:%S'
   
+  # "log-level": debug (default) | info | warning | error. On slow nodes "info" avoids the cost of writing (and formatting) debug messages
+  level = logging.DEBUG
+  if 'log-level' in config and config['log-level']:
+    level = logging.getLevelName(str(config['log-level']).upper())
+    if not isinstance(level, int):
+      level = logging.DEBUG
+  
   if not 'console-log' in config or config['console-log']:
-    logging.basicConfig(format=format, datefmt=dateformat, level=logging.DEBUG)
+    logging.basicConfig(format=format, datefmt=dateformat, level=level)
     # Alternative: h = logging.StreamHandler(); h.setFormatter(logging.Formatter(format, datefmt=dateformat)); logging.getLogger().addHandler(h)
-  else:
-    logging.getLogger().setLevel(logging.DEBUG)
+  logging.getLogger().setLevel(level)
     
   if 'log' in config:
     log = os.path.join(config['base_path'], config['log'])
@@ -86,6 +92,7 @@ def init_logging(config):
     h = TimedRotatingFileHandler(log, when='midnight')
     h.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt=dateformat))
     l = logging.getLogger('messages')
+    l.setLevel(logging.INFO) # independent from "log-level"
     l.propagate = False
     l.addHandler(h)
   
@@ -94,6 +101,7 @@ def init_logging(config):
     h = TimedRotatingFileHandler(log, when='midnight')
     h.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt=dateformat))
     l = logging.getLogger('debug')
+    l.setLevel(logging.DEBUG) # independent from "log-level"
     l.propagate = False
     l.addHandler(h)
 

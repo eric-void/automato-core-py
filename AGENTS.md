@@ -8,7 +8,8 @@ Python implementation of Automato's shared core. Read `../AGENTS.md` and `../ARC
 - `mqtt.py`: MQTT broker abstraction and message handling.
 - `scripting_js.py`: evaluates embedded `js:`/`jsf:` definition snippets using Js2Py and provides the script context/helper functions.
 - `notifications.py`, `utils.py`, `system_extra.py`: notification, shared utility, locale/logging support.
-- `system_test.py`, `test.py`: core tests; docs contain glossary/event notes and examples.
+- `system_test.py`, `test.py`: core tests run by the node "live" test suite; docs contain glossary/event notes and examples.
+- `tests/`: code-oriented unit tests (core without broker, see `tests/helpers.py`), run by `../automato-node-py/bin/unit-tests.sh`. The core must stay importable without the node package.
 
 ## Guidance
 

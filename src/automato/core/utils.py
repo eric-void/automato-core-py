@@ -12,6 +12,7 @@ import zlib
 import hashlib
 import math
 import re
+import copy
 
 def log_stacktrace(message = 'current stacktrace'):
   logging.debug(message + ": " + ''.join(traceback.format_stack()))
@@ -78,6 +79,20 @@ def dict_merge(dct, merge_dct, join_lists_depth = 0, add_keys = True):
     
   return merge_dct
 
+
+def data_copy(v):
+  """
+  Deep copy of data made of dict, list and primitive types (like decoded json payloads and event data), much faster than copy.deepcopy.
+  Other types are copied with copy.deepcopy.
+  """
+  t = type(v)
+  if t is dict:
+    return {k: data_copy(x) for k, x in v.items()}
+  if t is list:
+    return [data_copy(x) for x in v]
+  if t is str or t is int or t is float or t is bool or v is None:
+    return v
+  return copy.deepcopy(v)
 
 def strftime(timestamp, tformat = '%Y-%m-%d %H:%M:%S'):
   return datetime.datetime.fromtimestamp(timestamp).strftime(tformat) if timestamp > 0 else '-'
@@ -148,7 +163,7 @@ def json_export(v):
     return json.dumps(v, allow_nan = False)
   except ValueError as e:
     if str(e) == 'Out of range float values are not JSON compliant' or str(e) == 'Out of range float values are not JSON compliant: nan':
-      logging.warn("utils.json_export> trying to export a value with NaN values, converting them to null... (value: " + str(v) + ")")
+      logging.warning("utils.json_export> trying to export a value with NaN values, converting them to null... (value: " + str(v) + ")")
       v = nan_remove(v)
       try:
         return json.dumps(v, allow_nan = False)
@@ -166,7 +181,7 @@ def json_import(v):
   try:
     return json.loads(v, parse_constant = lambda x: None)
   except:
-    logging.exception()
+    logging.exception("utils.json_import> invalid json: " + str(v)[:200])
     return None
   
 def nan_remove(v):
@@ -189,7 +204,7 @@ def json_sorted_encode(data, recursive = False):
   return json_export(sort_map(data, recursive))
 
 def sort_map(data, recursive = False):
-  return data if not isinstance(data, dict) else {x:(sort_map(data[x]) if recursive else data[x]) for x in sorted(data)};
+  return data if not isinstance(data, dict) else {x:(sort_map(data[x], recursive) if recursive else data[x]) for x in sorted(data)}
 
 def b64_compress_data(data):
   """
@@ -218,7 +233,7 @@ def array_sum(a, decimals = -1):
     if i is not None:
       res = res + i
       c = c + 1
-  return (round(res) if decimals >= 0 else res) if c > 0 else None
+  return (round(res, decimals) if decimals >= 0 else res) if c > 0 else None
   
 def array_avg(a, decimals = -1, valid_min = None, valid_max = None):
   res = 0

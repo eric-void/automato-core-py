@@ -14,7 +14,6 @@ import re
 from automato.core import system
 from automato.core import utils
 from automato.core import scripting_js
-from automato.node import node_system as node
 
 notifications_last_topic_payloads = {}
 notifications_topic_next_level = {}

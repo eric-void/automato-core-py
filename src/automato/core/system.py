@@ -63,7 +63,7 @@ from automato.core import utils
 
 index_topic_cache = { 'hits': 0, 'miss': 0, 'data': {} }
 index_topic_cache_lock = threading.Lock()
-INDEX_TOPIC_CACHE_MAXSIZE = 1024
+INDEX_TOPIC_CACHE_MAXSIZE = 4096 # per index (published/subscribed): it should be greater than the number of different topics seen on the broker
 INDEX_TOPIC_CACHE_PURGETIME = 3600
 
 destroyed = False
@@ -76,7 +76,9 @@ def set_config(_config):
 def boot():
   global config, destroyed
   
+  global _stats_detailed
   destroyed = False
+  _stats_detailed = bool(config.get('stats-detailed', False))
   system_extra.init_locale(config)
   system_extra.init_logging(config)
   _reset()
@@ -84,7 +86,7 @@ def boot():
   mqtt.init()
   mqtt_config = {
     'client_id': 'automato-node',
-    'cache': True, 
+    'cache': False, # mqtt.get()/getTime() cache of all received payloads: not used by the node, and it costs memory
     'all': True, 
     'subscribe': { '[all]': _on_mqtt_message },
     'publish_before_connection_policy': 'queue', # connect, queue, error
@@ -192,11 +194,12 @@ def _mqtt_connect_callback(callback, phase):
     callback()
 
 def init(callback):
-  global config, all_entries, default_node_name, subscribed_response, subscription_thread
+  global config, all_entries, default_node_name, subscribed_response, subscription_thread, subscription_thread_stop
   topic_cache_reset()
   default_node_name = config['name'] if 'name' in config else 'root'
   
   subscribed_response = []
+  subscription_thread_stop = threading.Event()
   subscription_thread = threading.Thread(target = _subscription_timer_thread, daemon = True) # daemon = True allows the main application to exit even though the thread is running. It will also (therefore) make it possible to use ctrl+c to terminate the application
   subscription_thread.start()
   
@@ -216,6 +219,7 @@ def destroy():
     entry_unload(list(all_entries.keys()))
   
   destroyed = True
+  subscription_thread_stop.set()
   notifications.destroy()
   subscription_thread.join()
   _stats_show()
@@ -277,6 +281,8 @@ _stats_start_t = 0
 _stats_show_t = 0
 
 DEBUG_STATS_INTERVAL = 600 # every X seconds log stats of timings
+# Detailed stats (per topic): useful to find slow topics, but they cost a string concatenation for every message, and a stats key for every topic seen. Enable with "stats-detailed": true in config.
+_stats_detailed = False
 
 def _stats_start():
   global _stats, _stats_start_t, _stats_show_t
@@ -651,7 +657,7 @@ def _on_events_passthrough_listener_lambda(dest_entry, passthrough_conf):
   return lambda entry, eventname, eventdata, caller, published_message: _on_events_passthrough_listener(entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf)
   
 def _on_events_passthrough_listener(source_entry, eventname, eventdata, caller, published_message, dest_entry, passthrough_conf):
-  params = copy.deepcopy(eventdata['params'])
+  params = utils.data_copy(eventdata['params'])
   if passthrough_conf['remove_keys'] and ('keys' in eventdata):
     for k in eventdata['keys']:
       del params[k]
@@ -816,6 +822,28 @@ _re_topic_matches_cache = {} # TODO put a limit on _re_topic_matches_cache (now 
 #CACHE_TOPIC_MATCHES_MAXSIZE=102400 # TODO Very high but should contain AT LEAST # of subscribed+published topic_rules * # of topic published on broker. It should be auto-compiled? Or, if it's too high, the management of _cache_topic_matches should be better
 #CACHE_TOPIC_MATCHES_PURGETIME=3600
 
+_topic_rule_parse_cache = {}
+TOPIC_RULE_PARSE_CACHE_MAXSIZE = 4096
+
+def _topic_rule_parse(rule):
+  """
+  Parse a topic rule (with _re_topic_matches), the result is cached (rules are few and always the same: they come from definitions)
+  @return groupdict of _re_topic_matches, or None if the rule is invalid
+  """
+  try:
+    return _topic_rule_parse_cache[rule]
+  except KeyError:
+    pass
+  m = _re_topic_matches.match(rule)
+  m = m.groupdict() if m else None
+  if m:
+    # Exact topic (no wildcards): matched with a string comparison
+    m['topic_exact'] = bool(m['topic_simple']) and '#' not in m['topic_simple'] and '+' not in m['topic_simple']
+  if len(_topic_rule_parse_cache) >= TOPIC_RULE_PARSE_CACHE_MAXSIZE:
+    _topic_rule_parse_cache.clear()
+  _topic_rule_parse_cache[rule] = m
+  return m
+
 def topic_matches(rule, topic, payload = None):
   """
   @param rule a/b | a/# | /^(.*)$/ | a/b[payload1|payload2] | a/#[/^(payload.*)$/] | /^(.*)$/[js: payload['a']==1 && matches[1] == 'x']
@@ -845,10 +873,11 @@ def topic_matches(rule, topic, payload = None):
     'matched': False, # Full match result
     'used': time()
   }
-  m = _re_topic_matches.match(rule)
-  m = m.groupdict() if m else None
+  m = _topic_rule_parse(rule)
   if m:
-    if m['topic_simple']:
+    if m['topic_exact']:
+      result['topic_matches'] = [True] if m['topic_simple'] == topic else []
+    elif m['topic_simple']:
       result['topic_matches'] = [True] if mqtt.topicMatchesMQTT(m['topic_simple'], topic) else []
     elif m['topic_regex']:
       try:
@@ -919,9 +948,8 @@ def topic_rule_is_exact(rule):
   """
   Return True if the topic part of the rule has no wildcards ("#", "+") and is not a regexp (the payload filter part is not considered)
   """
-  global _re_topic_matches
-  m = _re_topic_matches.match(rule)
-  return True if m and m.group('topic_simple') and '#' not in m.group('topic_simple') and '+' not in m.group('topic_simple') else False
+  m = _topic_rule_parse(rule)
+  return True if m and m['topic_exact'] else False
 
 def topic_rule_preferred(rule, definition, other_rule, other_definition):
   """
@@ -1133,7 +1161,7 @@ def entries_subscribed_to(topic, payload = None, strict_match = False):
 
 def entry_topic_published_definition(entry, topic, payload = None, strict_match = False, skip_topic_match_priority = False):
   if topic in entry.definition['publish']:
-    return entry.definition['publish']
+    return entry.definition['publish'][topic]
   res = None
   if not strict_match:
     for topic_rule in entry.definition['publish']:
@@ -1146,11 +1174,12 @@ def entry_topic_published_definition(entry, topic, payload = None, strict_match 
   return res
 
 def entry_is_publisher_of(entry, topic, payload = None):
-  return True if entry_topic_published_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) else False
+  # NOTE: an empty definition (like 'base/#': {}) is a valid one
+  return entry_topic_published_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) is not None
 
 def entry_topic_subscription_definition(entry, topic, payload = None, strict_match = False, skip_topic_match_priority = False):
   if topic in entry.definition['subscribe']:
-    return entry.definition['subscribe']
+    return entry.definition['subscribe'][topic]
   res = None
   if not strict_match:
     for topic_rule in entry.definition['subscribe']:
@@ -1163,7 +1192,8 @@ def entry_topic_subscription_definition(entry, topic, payload = None, strict_mat
   return res
 
 def entry_is_subscribed_to(entry, topic, payload = None):
-  return True if entry_topic_subscription_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) else False
+  # NOTE: an empty definition (like 'base/#': {}) is a valid one
+  return entry_topic_subscription_definition(entry, topic, strict_match = False, skip_topic_match_priority = True) is not None
 
 
 ###############################################################################################################################################################
@@ -1201,7 +1231,8 @@ class Message(object):
       _s = _stats_start()
       entries = entries_publishers_of(self.topic, self.payload)
       _stats_end('Message.publishedMessages().find', _s)
-      _stats_end('Message(' + self.topic + ').publishedMessages().find', _s)
+      if _stats_detailed:
+        _stats_end('Message(' + self.topic + ').publishedMessages().find', _s)
       
       _s = _stats_start()
       self._publishedMessages = []
@@ -1224,7 +1255,8 @@ class Message(object):
         #else:
         #  logging.debug("SYSTEM> Ignored publishedmessage {entry_id}.{topic_rule} ({topic})".format(entry_id = entry_id, topic_rule = entries[entry_id]['topic'], topic = self.topic))
       _stats_end('Message.publishedMessages().create', _s)
-      _stats_end('Message(' + self.topic + ').publishedMessages().create', _s)
+      if _stats_detailed:
+        _stats_end('Message(' + self.topic + ').publishedMessages().create', _s)
 
     return self._publishedMessages
 
@@ -1232,15 +1264,15 @@ class Message(object):
     """
     Return first publishedMessaged NOT internal (if present), or internal (if no NOT internal is found)
     """
-    if self._publishedMessages and self._firstPublishedMessage is None:
-      for pm in self.publishedMessages():
+    if self._firstPublishedMessage is None:
+      pms = self.publishedMessages()
+      for pm in pms:
         if not pm.internal:
           self._firstPublishedMessage = pm
           break
-      if self._firstPublishedMessage is None:
-        for pm in self.publishedMessages():
-          self._firstPublishedMessage = pm
-    return self._firstPublishedMessage;
+      if self._firstPublishedMessage is None and pms:
+        self._firstPublishedMessage = pms[0]
+    return self._firstPublishedMessage
     
   def subscribedMessages(self):
     if self._subscribedMessages is None:
@@ -1248,14 +1280,16 @@ class Message(object):
       _s = _stats_start()
       entries = entries_subscribed_to(self.topic, self.payload)
       _stats_end('Message.subscribedMessages().find', _s)
-      _stats_end('Message(' + self.topic + ').subscribedMessages().find', _s)
+      if _stats_detailed:
+        _stats_end('Message(' + self.topic + ').subscribedMessages().find', _s)
       
       _s = _stats_start()
       self._subscribedMessages = []
       for entry_id in entries:
         self._subscribedMessages.append(SubscribedMessage(self, entries[entry_id]['entry'], entries[entry_id]['topic'], entries[entry_id]['definition'], entries[entry_id]['matches'] if entries[entry_id]['matches'] != [True] else []))
       _stats_end('Message.subscribedMessages().create', _s)
-      _stats_end('Message(' + self.topic + ').subscribedMessages().create', _s)
+      if _stats_detailed:
+        _stats_end('Message(' + self.topic + ').subscribedMessages().create', _s)
 
     return self._subscribedMessages
   
@@ -1267,7 +1301,7 @@ class Message(object):
     return self._events
   
   def copy(self):
-    m = Message(self.topic, copy.deepcopy(self.payload), self.qos, self.retain, self.payload_source, self.received, self.id)
+    m = Message(self.topic, utils.data_copy(self.payload), self.qos, self.retain, self.payload_source, self.received, self.id)
     m._publishedMessages = self._publishedMessages
     m._firstPublishedMessage = self._firstPublishedMessage
     m._subscribedMessages = self._subscribedMessages
@@ -1283,9 +1317,9 @@ class PublishedMessage(object):
     self.topic = message.topic if not do_copy else copy.deepcopy(message.topic)
     # NOTE: payload in PublishedMessage could be different from payload in message (if 'payload_transform' is in definition)
     _s = _stats_start()
-    self.payload = (message.payload if not do_copy else copy.deepcopy(message.payload)) if 'payload_transform' not in definition else _entry_transform_payload(entry, message.topic, message.payload, definition['payload_transform'])
+    self.payload = (message.payload if not do_copy else utils.data_copy(message.payload)) if 'payload_transform' not in definition else _entry_transform_payload(entry, message.topic, message.payload, definition['payload_transform'])
     _stats_end('PublishedMessages.payload_transformed', _s)
-    self.matches = matches if not do_copy else copy.deepcopy(matches)
+    self.matches = matches if not do_copy else utils.data_copy(matches)
     self.internal = topic_published_definition_is_internal(self.definition)
     self._events = None
     self._notification = None
@@ -1341,15 +1375,16 @@ class SubscribedMessage(object):
     self.topic_rule = topic_rule
     self.definition = definition
     self.topic = message.topic if not do_copy else copy.deepcopy(message.topic)
-    self.payload = message.payload if not do_copy else copy.deepcopy(message.payload)
-    self.matches = matches if not do_copy else copy.deepcopy(matches)
+    self.payload = message.payload if not do_copy else utils.data_copy(message.payload)
+    self.matches = matches if not do_copy else utils.data_copy(matches)
     self.internal = topic_subscription_definition_is_internal(self.definition)
 
   def copy(self):
     m = SubscribedMessage(self.message, self.entry, self.topic_rule, self.definition, self.matches, do_copy = True)
     return m
 
-_current_received_message = None
+# Message currently processed by the mqtt thread (thread local: other threads see None)
+_current_received_message = threading.local()
 
 def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timems):
   """
@@ -1357,9 +1392,13 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
   This is called AFTER mqtt_on_subscribed_message (called only for subscribed topic)
   """
   m = Message(topic, payload, qos, retain, payload_source, received = timems)
-  global _current_received_message
-  _current_received_message = threading.local()
   _current_received_message.message = m
+  try:
+    _on_mqtt_message_process(m, topic, timems)
+  finally:
+    _current_received_message.message = None
+
+def _on_mqtt_message_process(m, topic, timems):
   
   # invoke events listeners
   for pm in m.publishedMessages():
@@ -1368,18 +1407,21 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
     _s = _stats_start()
     events = pm.events()
     _stats_end('on_mqtt_message.generate_events', _s)
-    _stats_end('on_mqtt_message(' + str(topic) + ').generate_events', _s)
+    if _stats_detailed:
+      _stats_end('on_mqtt_message(' + str(topic) + ').generate_events', _s)
     _s = _stats_start()
     for eventdata in events:
       _entry_event_invoke_listeners(pm.entry, eventdata, 'message', pm)
     _stats_end('on_mqtt_message.invoke_elisteners', _s)
-    _stats_end('on_mqtt_message(' + str(topic) + ').invoke_elisteners', _s)
+    if _stats_detailed:
+      _stats_end('on_mqtt_message(' + str(topic) + ').invoke_elisteners', _s)
   
   # manage responses callbacks
   _s = _stats_start()
   _subscribed_response_on_message(m)
   _stats_end('on_mqtt_message.subscribed_response', _s)
-  _stats_end('on_mqtt_message(' + str(topic) + ').subscribed_response', _s)
+  if _stats_detailed:
+    _stats_end('on_mqtt_message(' + str(topic) + ').subscribed_response', _s)
 
   # call external handlers
   _s = _stats_start()
@@ -1388,11 +1430,11 @@ def _on_mqtt_message(topic, payload_source, payload, qos, retain, matches, timem
     for h in handler_on_message:
       h(m.copy())
   _stats_end('on_mqtt_message.handlers', _s)
-  _stats_end('on_mqtt_message(' + str(topic) + ').handlers', _s)
+  if _stats_detailed:
+    _stats_end('on_mqtt_message(' + str(topic) + ').handlers', _s)
 
 def current_received_message():
-  global _current_received_message
-  return _current_received_message.message if _current_received_message is not None and hasattr(_current_received_message, 'message') else None
+  return getattr(_current_received_message, 'message', None)
 
 def _entry_event_process(entry, eventname, eventdef, published_message):
   ret = scripting_js.script_eval(eventdef, {"topic": published_message.topic, "payload": published_message.payload, "matches": published_message.matches}, to_dict = True, cache = True)
@@ -1448,7 +1490,7 @@ def _entry_event_publish_internal(entry, eventname, params, time, data, event_ke
     p = [p for p in events_published[eventname][entry.id] if not entry_event_keys_index_is_temporary(p)]
     for keys_index2 in p:
       if keys_index2 != '{}':
-        data2 = { 'name': eventname, 'time': time, 'params': copy.deepcopy(params), 'changed_params': {}, 'keys': events_published[eventname][entry.id][keys_index2]['keys'] }
+        data2 = { 'name': eventname, 'time': time, 'params': utils.data_copy(params), 'changed_params': {}, 'keys': events_published[eventname][entry.id][keys_index2]['keys'] }
         __entry_event_publish_store(entry, eventname, keys_index2, data2, time, event_keys)
   
   return data
@@ -1458,7 +1500,7 @@ def __entry_event_publish_store(entry, eventname, keys_index, data, time, event_
   
   if eventname not in entry.events:
     entry.events[eventname] = ['?']
-    logging.warn("Generated an event not declared by the entry, added now to the declaration. Entry: {entry}, event: {eventname}".format(entry = entry.id, eventname = eventname))
+    logging.warning("Generated an event not declared by the entry, added now to the declaration. Entry: {entry}, event: {eventname}".format(entry = entry.id, eventname = eventname))
   
   with events_published_lock:
     # Extract changed params (from previous event detected)
@@ -1528,12 +1570,12 @@ def _entry_event_invoke_listeners(entry, eventdata, caller, published_message = 
             _s = _stats_start()
             if condition is None or _entry_event_params_match_condition(eventdata, condition):
               #logging.debug("_entry_event_invoke_listeners_GO")
-              listener(entry, eventname, copy.deepcopy(eventdata), caller, published_message)
-            _stats_end('event_listener(' + str(listener) + '|' + str(condition) + ')', _s)
+              listener(entry, eventname, utils.data_copy(eventdata), caller, published_message)
+            _stats_end('event_listener(' + str(reference_entry_id) + ':' + eventname + ('|' + condition if condition else '') + ')', _s)
             
   if handler_on_all_events:
     for h in handler_on_all_events:
-      h(entry, eventname, copy.deepcopy(eventdata), caller, published_message)
+      h(entry, eventname, utils.data_copy(eventdata), caller, published_message)
 
 def _entry_event_params_match_condition(eventdata, condition):
   """
@@ -1625,9 +1667,10 @@ def subscribe_response(entry, message, callback = False, no_response_callback = 
   global subscribed_response
   
   if id:
-    for x in subscribed_response:
-      if x['id'] and x['id'] == id:
-        return False
+    with subscribed_response_lock:
+      for x in subscribed_response:
+        if x['id'] and x['id'] == id:
+          return False
   
   s = { 'message': message, 'callback': callback, 'no_response_callback': no_response_callback, 'entry': entry, 'id': id, 'listeners': [] }
 
@@ -1647,9 +1690,13 @@ def subscribe_response(entry, message, callback = False, no_response_callback = 
   if not s['listeners']:
     return False
   
-  subscribed_response.append(s)
+  with subscribed_response_lock:
+    subscribed_response.append(s)
   
   return True
+
+# subscribed_response is changed by the mqtt thread (_subscribed_response_on_message), the subscription timer thread and every thread calling subscribe_response: changes to the list must be done with this lock. Callbacks are called outside the lock.
+subscribed_response_lock = threading.RLock()
 
 def _subscribed_response_on_message(message):
   """
@@ -1665,7 +1712,10 @@ def _subscribed_response_on_message(message):
   # If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be normal a slowly processing of messages. So we add some more delay (20%).
   delay = delay * 1.2
   
-  for x in subscribed_response:
+  with subscribed_response_lock:
+    current = list(subscribed_response)
+  callbacks = []
+  for x in current:
     for l in x['listeners']:
       if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count']):
         matches = topic_matches(l['topic_rule'], message.topic, message.payload)
@@ -1674,26 +1724,39 @@ def _subscribed_response_on_message(message):
           l['count'] = l['count'] + 1
           final = False if [m['count'] for m in x['listeners'] if m['count'] == 0 and m['max_count'] > 0] else True
           if x['callback']:
-            x['callback'](x['entry'], x['id'], message, final, x['message'])
+            callbacks.append((x, final))
           x['called'] = True
-  for x in subscribed_response:
-    if [l for l in x['listeners'] if l['expiry'] + delay <= now or l['count'] <= 0]:
-      x['listeners'] = [l for l in x['listeners'] if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count'])]
+  with subscribed_response_lock:
+    for x in subscribed_response:
+      if [l for l in x['listeners'] if l['expiry'] + delay <= now or l['count'] <= 0]:
+        x['listeners'] = [l for l in x['listeners'] if l['expiry'] + delay > now and (l['count'] == 0 or l['count'] < l['max_count'])]
+  for x, final in callbacks:
+    x['callback'](x['entry'], x['id'], message, final, x['message'])
 
 def _subscription_timer_thread():
   """
-  An internal thread, initialied by init(), that scans for expired subscribed response topics (@see subscribe_response)
+  An internal thread, initialied by init(), that scans for expired subscribed response topics (@see subscribe_response) and manages events groups
   """
-  global subscribed_response, destroyed
+  global destroyed
   while not destroyed:
+    try:
+      _subscription_timer_step()
+    except:
+      # This thread must never die: response timeouts and events groups depend on it
+      logging.exception("SYSTEM> Error in subscription timer thread")
+    subscription_thread_stop.wait(.5)
+
+def _subscription_timer_step(now = None):
+  global subscribed_response
+  if now is None:
     now = timems()
-    delay = round(mqtt.queueDelay() / 1000 + 0.49) * 1000
-    # If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be a normal slowly processing of messages. So we add some more delay (20%).
-    delay = delay * 1.2
-    
+  delay = round(mqtt.queueDelay() / 1000 + 0.49) * 1000
+  # If there is a lot of delay in mqtt queue, we can assume there are probably a lot of messages managed by mqtt broker, so it could be a normal slowly processing of messages. So we add some more delay (20%).
+  delay = delay * 1.2
+  
+  with subscribed_response_lock:
     for x in subscribed_response:
       if [l for l in x['listeners'] if l['expiry'] + delay <= now]:
-        # TODO DEBUG REMOVE
         if 'called' not in x:
           for l in x['listeners']:
             if l['expiry'] + delay <= now:
@@ -1702,21 +1765,23 @@ def _subscription_timer_thread():
 
     expired = [x for x in subscribed_response if not x['listeners']]
     if expired:
-      for x in expired:
-        if x['no_response_callback'] and 'called' not in x:
-          x['no_response_callback'](x['entry'], x['id'], x['message'])
       subscribed_response = [x for x in subscribed_response if x['listeners']]
-    
-    events_groups_check()
-    sleep(.5)
+  
+  for x in expired:
+    if x['no_response_callback'] and 'called' not in x:
+      try:
+        x['no_response_callback'](x['entry'], x['id'], x['message'])
+      except:
+        logging.exception("SYSTEM> Error in no_response_callback for entry #{id}".format(id = x['entry'].id if x['entry'] else '?'))
+  
+  events_groups_check()
 
 def events_groups_push(egkey, entry, data, event_keys, keys_index):
   global events_groups, events_groups_lock
+  eventdata = None
   with events_groups_lock:
     if keys_index in events_groups[egkey]['data'] and data['time'] - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
       eventdata = _entry_event_publish_internal(entry, data['name'], events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, keys_index)
-      if eventdata:
-        _entry_event_invoke_listeners(entry, eventdata, 'group', None)
       del events_groups[egkey]['data'][keys_index]
     if keys_index not in events_groups[egkey]['data']:
       events_groups[egkey]['data'][keys_index] = {
@@ -1726,17 +1791,22 @@ def events_groups_push(egkey, entry, data, event_keys, keys_index):
     else:
       for k in data['params']:
         events_groups[egkey]['data'][keys_index]['data']['params'][k] = data['params'][k]
+  # Listeners are invoked outside the lock: they could generate other grouped events
+  if eventdata:
+    _entry_event_invoke_listeners(entry, eventdata, 'group', None)
 
-def events_groups_check():
+def events_groups_check(now = None):
   global events_groups, events_groups_lock
-  now = mqtt.queueTimems()
-  if now > 0:
-    now = int(now / 1000)
-  else:
-    now = time()
-  for egkey in events_groups:
-    to_delete = []
-    with events_groups_lock:
+  if now is None:
+    now = mqtt.queueTimems()
+    if now > 0:
+      now = int(now / 1000)
+    else:
+      now = time()
+  todo = []
+  with events_groups_lock:
+    for egkey in list(events_groups.keys()):
+      to_delete = []
       for keys_index in events_groups[egkey]['data']:
         if now - events_groups[egkey]['data'][keys_index]['time'] >= events_groups[egkey]['group_time']:
           d = egkey.find(".")
@@ -1747,11 +1817,13 @@ def events_groups_check():
               event_keys = entry_event_keys(entry, eventname)
               eventdata = _entry_event_publish_internal(entry, eventname, events_groups[egkey]['data'][keys_index]['data']['params'], events_groups[egkey]['data'][keys_index]['data']['time'], events_groups[egkey]['data'][keys_index]['data'], event_keys, entry_event_keys_index(events_groups[egkey]['data'][keys_index]['data']['keys']))
               if eventdata:
-                _entry_event_invoke_listeners(entry, eventdata, 'group', None)
+                todo.append((entry, eventdata))
               to_delete.append(keys_index)
-    for i in to_delete:
-      with events_groups_lock:
+      for i in to_delete:
         del events_groups[egkey]['data'][i]
+  # Listeners are invoked outside the lock: they could generate other grouped events
+  for entry, eventdata in todo:
+    _entry_event_invoke_listeners(entry, eventdata, 'group', None)
 
 
 ###############################################################################################################################################################
@@ -1867,7 +1939,7 @@ def on_event(eventref, listener = None, reference_entry = None, reference_tag = 
   """
   global events_listeners
   if not reference_entry:
-    logging.warn("SYSTEM> Called system.on_event without a reference entry: {eventref}".format(eventref = eventref))
+    logging.warning("SYSTEM> Called system.on_event without a reference entry: {eventref}".format(eventref = eventref))
   d = decode_event_reference(eventref, default_entry_id = reference_entry.id if reference_entry else None) if not isinstance(eventref, dict) else eventref
   if not d:
     logging.error("#{entry}> Invalid '{type}' definition{tag}: {defn}".format(entry = reference_entry.id if reference_entry else '?', type = 'on event' if listener else 'events_listen', tag = (' in ' + reference_tag) if reference_tag else '', defn = eventref))
@@ -1900,7 +1972,7 @@ def entry_on_event(entry, event, listener, condition = None, reference_entry = N
   on_event({'entry': entry.id, 'event': event, 'condition': condition}, listener, reference_entry, reference_tag)
 
 """
-Remove all event listener with target or reference equal to reference_entry_id
+Remove all event listener registered by (with reference equal to) reference_entry_id
 """
 def remove_event_listener_by_reference_entry(reference_entry_id):
   global events_listeners
@@ -1908,10 +1980,8 @@ def remove_event_listener_by_reference_entry(reference_entry_id):
   for eventname in events_listeners:
     clean2 = False
     for entry_ref in events_listeners[eventname]:
-      if entry_id_match(entry_ref, reference_entry_id):
-        events_listeners[eventname][entry_ref] = []
-      else:
-        events_listeners[eventname][entry_ref] = [[listener, condition, ref] for listener, condition, ref in events_listeners[eventname][entry_ref] if ref != reference_entry_id]
+      # NOTE: listeners on events of the unloaded entry, registered by other entries, are kept: if the entry is reloaded (for example a remote entry with new metadata) they must continue to work
+      events_listeners[eventname][entry_ref] = [[listener, condition, ref] for listener, condition, ref in events_listeners[eventname][entry_ref] if ref != reference_entry_id]
       if not events_listeners[eventname][entry_ref]:
         clean2 = True
     if clean2:
@@ -2147,8 +2217,11 @@ def transform_action_reference_to_event_reference(actionref, return_decoded = Fa
   d = decode_action_reference(actionref, no_action = True) if not isinstance(actionref, dict) else actionref
   if not d:
     return None
-  r = {'entry': d['entry'], 'event': transform_action_name_to_event_name(d['action']) if d['action'] else None, 'condition': d['init'].strip('; ').replace('=', '==').replace(';', '&&') if d['init'] else None }
+  r = {'entry': d['entry'], 'event': transform_action_name_to_event_name(d['action']) if d['action'] else None, 'condition': _re_assignment.sub('==', d['init'].strip('; ')).replace(';', '&&') if d['init'] else None }
   return r if return_decoded else r['entry'] + (('.' + r['event']) if r['event'] else '') + (('(' + r['condition'] + ')') if r['condition'] else '')
+
+# A single "=" (assignment), not part of "==", "!=", "<=", ">="
+_re_assignment = re.compile(r'(?<![=!<>])=(?!=)')
 
 def transform_action_name_to_event_name(actionname):
   return actionname.replace('-set', '')

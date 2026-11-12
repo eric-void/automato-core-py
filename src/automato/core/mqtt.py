@@ -193,7 +193,9 @@ def _mqtt_communication_thread():
     elif d['type'] == 'subscribe':
       try:
         decoded = _decodePayload(d['payload'])
-        logging.getLogger(settings["message-logger"]).info('received message{retained} {topic} = {payload}{delay}'.format(topic = d['topic'], payload = d['payload'], retained = ' (retained)' if d['retain'] else '', delay = ' (' + str(delay) + 'ms delay, size: ' + str(mqtt_communication_queue.qsize()) + ')' if delay > 0 else ''))
+        message_logger = logging.getLogger(settings["message-logger"])
+        if message_logger.isEnabledFor(logging.INFO):
+          message_logger.info('received message{retained} {topic} = {payload}{delay}'.format(topic = d['topic'], payload = d['payload'], retained = ' (retained)' if d['retain'] else '', delay = ' (' + str(delay) + 'ms delay, size: ' + str(mqtt_communication_queue.qsize()) + ')' if delay > 0 else ''))
         if "cache" in settings and settings['cache']:
           cache[d['topic']] = decoded
         if "subscribe" in settings:
@@ -203,12 +205,12 @@ def _mqtt_communication_thread():
               is_regex = v.startswith("/") and v.endswith("/")
               matches = _topicMatchesToList(re.search(v[1:-1], d['topic'])) if is_regex else []
               if (not is_regex and topicMatchesMQTT(v, d['topic'])) or (is_regex and matches):
-                settings["subscribe"][v](d['topic'], d['payload'], copy.deepcopy(decoded), d['qos'], d['retain'], matches, d['timems'])
+                settings["subscribe"][v](d['topic'], d['payload'], utils.data_copy(decoded), d['qos'], d['retain'], matches, d['timems'])
                 done = True
           if not done and "[else]" in settings["subscribe"]:
-            settings["subscribe"]["[else]"](d['topic'], d['payload'], copy.deepcopy(decoded), d['qos'], d['retain'], None, d['timems'])
+            settings["subscribe"]["[else]"](d['topic'], d['payload'], utils.data_copy(decoded), d['qos'], d['retain'], None, d['timems'])
           if "[all]" in settings["subscribe"]:
-            settings["subscribe"]["[all]"](d['topic'], d['payload'], copy.deepcopy(decoded), d['qos'], d['retain'], None, d['timems'])
+            settings["subscribe"]["[all]"](d['topic'], d['payload'], utils.data_copy(decoded), d['qos'], d['retain'], None, d['timems'])
       except:
         logging.exception('error in message handling')
       if mqtt_subscribe_pause_on_topic and d['topic'] == mqtt_subscribe_pause_on_topic:
@@ -217,9 +219,9 @@ def _mqtt_communication_thread():
         system.sleep(.1)
 
 def _mqtt_communication_publish(topic, payload, qos, retain):
-  logging.debug("publishing on broker {topic} (qos = {qos}, retain = {retain})".format(topic = topic, qos = qos, retain = retain))
+  logging.debug("publishing on broker %s (qos = %s, retain = %s)", topic, qos, retain)
   if settings["message-logger"] != '':
-    logging.getLogger(settings["message-logger"]).info("publishing on broker {topic} = {payload} (qos = {qos}, retain = {retain})".format(topic = topic, payload = str(payload), qos = qos, retain = retain))
+    logging.getLogger(settings["message-logger"]).info("publishing on broker %s = %s (qos = %s, retain = %s)", topic, payload, qos, retain)
   try:
     client.publish(topic, payload, qos, retain)
   except:
@@ -232,7 +234,7 @@ def _onMessage(client, userdata, msg):
   if settings['topic_filter_ignore']:
     for f in settings['topic_filter_ignore']:
       if topicMatches(msg.topic, f):
-        logging.getLogger(settings["message-logger"]).info('ignored message{retained} {topic} = {payload}'.format(topic = msg.topic, payload = msg.payload, retained = ' (retained)' if msg.retain else ''))
+        logging.getLogger(settings["message-logger"]).info('ignored message%s %s = %s', ' (retained)' if msg.retain else '', msg.topic, msg.payload)
         return
   
   mqtt_communication_queue.put({'type': 'subscribe', 'topic': msg.topic, 'payload': msg.payload, 'retain': msg.retain, 'qos': msg.qos, 'timems': system.timems()})
@@ -319,7 +321,11 @@ def publish(topic, payload, qos = 0, retain = False):
       if settings["message-logger"] != '':
         logging.getLogger(settings["message-logger"]).info("publishing on broker {topic} = {payload} (qos = {qos}, retain = {retain})".format(topic = topic, payload = str(payload), qos = qos, retain = retain))
       connect()
-      client.publish(topic, payload, qos, retain)
+      info = client.publish(topic, payload, qos, retain)
+      try:
+        info.wait_for_publish(5)
+      except Exception:
+        logging.exception("error waiting for publishing of {topic}".format(topic = topic))
       disconnect()
     elif settings['publish_before_connection_policy'] == 'queue':
       logging.debug("broker not connected, adding publish action to queue: {topic} (qos = {qos}, retain = {retain})".format(topic = topic, qos = qos, retain = retain))
