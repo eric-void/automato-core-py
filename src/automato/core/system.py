@@ -81,6 +81,8 @@ def boot():
   _stats_detailed = bool(config.get('stats-detailed', False))
   system_extra.init_locale(config)
   system_extra.init_logging(config)
+  # "js2py" (default) or "quickjs", see scripting_js
+  scripting_js.set_engine(config.get('scripting-engine'))
   _reset()
   
   mqtt.init()

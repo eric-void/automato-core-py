@@ -1,0 +1,6 @@
+# Optional: QuickJS scripting engine ("scripting-engine": "quickjs" in the node configuration, the default is Js2Py)
+# Not in requirements.txt: it is a C extension, PyPI has wheels for Linux x86_64/i686/aarch64, Windows and macOS arm64,
+# but not for armv7 (OpenWrt, without a compiler): build it with automato-node-py/bin/build-quickjs-wheel.sh and install the wheel with pip --no-deps.
+
+# https://github.com/genotrance/quickjs-ng https://pypi.org/project/quickjs-ng/
+quickjs-ng >= 0.18

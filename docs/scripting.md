@@ -2,7 +2,7 @@
 
 [Documentation index](README.md)
 
-Definitions contain small JavaScript snippets: event expressions, action payloads, conditions, payload transformations, notification handlers. The same definition is read by Python nodes and JavaScript clients, so the language is JavaScript in both: the Python core runs it through [Js2Py](https://github.com/PiotrDabkowski/Js2Py), the JavaScript core natively.
+Definitions contain small JavaScript snippets: event expressions, action payloads, conditions, payload transformations, notification handlers. The same definition is read by Python nodes and JavaScript clients, so the language is JavaScript in both: the Python core runs it through one of its [two engines](#engines-of-the-python-core), the JavaScript core natively.
 
 ## Two forms
 
@@ -52,7 +52,7 @@ Nodes can add more variables through module **exports** (for example a module th
 
 ## Writing portable snippets
 
-The same snippet runs on Js2Py (an ES5 interpreter written in Python) and in browsers. To stay safe:
+The same snippet runs on the Python core (with Js2Py, an ES5 interpreter written in Python, or QuickJS) and in browsers. To stay safe:
 
 - use ES5 syntax: `var`/`let`, `function`, no arrow functions, no template strings, no spread;
 - use `'key' in obj` and `obj['key']` rather than newer methods;
@@ -61,3 +61,21 @@ The same snippet runs on Js2Py (an ES5 interpreter written in Python) and in bro
 - in a `js:` expression both branches of a ternary may be evaluated by Js2Py: use `jsf:` with an `if` when a branch has side effects or is expensive.
 
 The parity test of [automato-core-js](https://github.com/eric-void/automato-core-js) runs the same definitions on both cores: add a case there when relying on a less common construct.
+
+## Engines of the Python core
+
+The `scripting-engine` key of the node configuration selects the engine (or the `AUTOMATO_SCRIPTING_ENGINE` environment variable, when the configuration does not set it). If the selected engine cannot be loaded, the node logs an error and uses the other one.
+
+| Engine | Package | Notes |
+|---|---|---|
+| `js2py` (default) | [Js2Py](https://github.com/PiotrDabkowski/Js2Py) | Pure Python, ES5. Unmaintained: the PyPI release works up to Python 3.11, a fork is needed up to 3.13, nothing works after |
+| `quickjs` | [quickjs-ng](https://pypi.org/project/quickjs-ng/) ([QuickJS](https://github.com/quickjs-ng/quickjs)) | C extension, ES2023, about 3 times faster (on golconda too), much smaller. It needs a wheel for the platform (see the installation docs for OpenWrt) |
+
+Both engines give the same results on the snippets of definitions (the QuickJS engine reproduces Js2Py on purpose: Python `None` is `undefined`, object properties set to `undefined` are kept, integral numbers are `int`). The differences, where Js2Py is the wrong one:
+
+- with Js2Py the Python helpers receive Js2Py values, not Python ones: `d()` always returns `-1`, `strftime()` without a format fails, `array_*()` fail. With QuickJS they work;
+- a `null` inside an object or a list (for example `{"battery": null}` in a JSON payload) is `null` with QuickJS, as in browsers, and `undefined` with Js2Py: `== null` works on both, `=== null` and `typeof` do not. A whole variable set to `null` (as an empty `payload`) is `undefined` on both;
+- module exports values (for example `is_day`) are updated at every call with QuickJS; Js2Py keeps the values of the last time the set of exports changed;
+- QuickJS accepts modern syntax (arrow functions, spread, `?.`, `??`, ...), but browsers and Js2Py may not: keep ES5 while Js2Py nodes exist.
+
+To verify a change on both engines: `AUTOMATO_SCRIPTING_ENGINE=quickjs automato-node-py/bin/unit-tests.sh` (the unit tests of `tests/test_scripting.py` always run both engines, skipping one not installed).

@@ -53,10 +53,11 @@ When `{"state": "on"}` arrives on `kitchen/light/status`, the core emits the eve
 
 - Python 3.11 or newer (tested on 3.11 and 3.13)
 - [paho-mqtt](https://pypi.org/project/paho-mqtt/) 2.x (1.x is still accepted)
-- [Js2Py](https://github.com/PiotrDabkowski/Js2Py), to evaluate the JavaScript expressions of definitions. The PyPI release works up to Python 3.11; for newer versions install a patched fork first, for example:
+- [Js2Py](https://github.com/PiotrDabkowski/Js2Py), the default engine for the JavaScript expressions of definitions. The PyPI release works up to Python 3.11; for newer versions install a patched fork first, for example:
   ```sh
   pip install 'Js2Py @ git+https://github.com/a-j-albert/Js2Py.git@cc64a715727f110b79310b8031e0ade9c501d5d3'
   ```
+- optionally [quickjs-ng](https://pypi.org/project/quickjs-ng/) (`requirements-quickjs.txt`), for the QuickJS engine (`"scripting-engine": "quickjs"`, see [scripting](docs/scripting.md#engines-of-the-python-core))
 - python-dateutil
 
 ```sh
@@ -84,7 +85,7 @@ Changes to the model must stay aligned with [automato-core-js](https://github.co
 |---|---|
 | `src/automato/core/system.py` | Entries, definitions, topic index and matching, events, actions |
 | `src/automato/core/mqtt.py` | MQTT client wrapper: connection, publish queue, payload decoding, cache |
-| `src/automato/core/scripting_js.py` | Evaluation of `js:`/`jsf:` expressions through Js2Py |
+| `src/automato/core/scripting_js.py` | Evaluation of `js:`/`jsf:` expressions, with the engine selected by `scripting-engine`: `scripting_js2py.py` (Js2Py) or `scripting_quickjs.py` (QuickJS) |
 | `src/automato/core/notifications.py` | Notification strings and levels |
 | `src/automato/core/utils.py` | Durations, dates, JSON, compression, merge helpers |
 | `src/automato/core/system_extra.py` | Logging and locale setup |
