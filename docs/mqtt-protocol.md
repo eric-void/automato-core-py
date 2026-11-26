@@ -24,12 +24,14 @@ Every node publishes the definitions it knows, at start, every 30 minutes, and w
   "from_node": "home-server",
   "time": 1731400000,
   "nodes": {
-    "home-server": { "description": "...", "time": 1731400000 },
+    "home-server": { "description": "...", "time": 1731400000, "versions": { "node": "1.0.0", "core": "1.0.0", "python": "3.13.1", "scripting_engine": "js2py" } },
     "router": { "description": "...", "time": 1731399000 }
   },
   "entries": "eJy..."
 }
 ```
+
+In `nodes`, `time` is when the node started, and `versions` are the versions of the node, of its core, of Python and the scripting engine in use (nodes before 1.0.0 don't send them). See [Versions](#versions).
 
 `entries` maps full entry ids to their exportable definitions (see [Entry definitions](entry-definition.md)). With the default `compress: true` it is a string: the JSON, compressed with zlib and encoded in base64. Without compression it is the object itself.
 
@@ -53,6 +55,7 @@ Published by the **master** node (`master: true` in its `nodes` configuration) w
 
 ```json
 {
+  "nodes": { "node_name": { "description", "time", "versions" } },
   "entries": { "entry_id@node": { ...exportable definition... } },
   "events": { "entry_id@node": { "event_name": { "<keys index>": { ...event data... } } } },
   "last_seen": { "entry_id@node": 1731399990 }
@@ -60,6 +63,12 @@ Published by the **master** node (`master: true` in its `nodes` configuration) w
 ```
 
 Without compression the three keys are at the top level. `events` has the format of `events_export()`; a client passes it to `events_import()`. The master exports only the events it computes (the ones it listens to, or all of them with `listen_all_events`).
+
+`nodes` (the alive nodes known by the master, as in `automato/metadata`) is sent from version 1.0.0 of the node.
+
+### Versions
+
+Versions are `MAJOR.MINOR.PATCH`. The two cores share `MAJOR.MINOR` (`automato/core/version.py` and `src/automato/core/version.js`): with the same `MAJOR.MINOR` they have the same calls and the same wire behavior, so a node and a client read definitions and messages in the same way; `PATCH` is per implementation. The node and the clients have their own versions.
 
 ## Entry topics
 
